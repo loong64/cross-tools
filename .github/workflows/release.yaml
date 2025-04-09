@@ -16,6 +16,7 @@ jobs:
         version:
           - legacy
           - stable
+          - mainline
           - latest
         target:
           - loongarch64-unknown-linux-gnu
@@ -26,6 +27,12 @@ jobs:
             target: loongarch64-unknown-linux-musl
           - os: ubuntu-22.04-arm
             version: legacy
+            target: loongarch64-unknown-linux-musl
+          - os: ubuntu-22.04
+            version: mainline
+            target: loongarch64-unknown-linux-musl
+          - os: ubuntu-22.04-arm
+            version: mainline
             target: loongarch64-unknown-linux-musl
     steps:
       - name: Checkout
