@@ -1,0 +1,70 @@
+#!/bin/bash
+
+set -e
+
+VERSION=$1
+TARGET=loongarch64-unknown-linux-gnu
+
+# packages
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+    automake \
+    bison \
+    bzip2 \
+    ca-certificates \
+    cmake \
+    curl \
+    file \
+    flex \
+    g++ \
+    gawk \
+    gdb \
+    git \
+    gperf \
+    help2man \
+    libncurses-dev \
+    libssl-dev \
+    libtool-bin \
+    lzip \
+    make \
+    ninja-build \
+    patch \
+    pkg-config \
+    python3 \
+    rsync \
+    sudo \
+    texinfo \
+    unzip \
+    wget \
+    xz-utils \
+    libssl-dev \
+    libffi-dev
+
+# crosstool-ng
+if [ ! -e /usr/bin/ct-ng ]; then
+    curl -Lf https://github.com/crosstool-ng/crosstool-ng/archive/crosstool-ng-1.27.0.tar.gz | tar xzf -
+    pushd crosstool-ng-crosstool-ng-1.27.0
+    ./bootstrap
+    ./configure --prefix=/usr
+    make -j$(nproc)
+    sudo make install
+    popd
+fi
+
+# build
+sudo mkdir -p /opt
+sudo chmod 0777 /opt
+mkdir -p build
+cp ${VERSION}/.config build/.config
+pushd build
+export CT_ALLOW_BUILD_AS_ROOT_SURE=1
+ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
+popd
+
+# tarball
+sudo mv /opt/x-tools/${TARGET} .
+sudo chown -R root:root ${TARGET}
+
+file_name="$(uname -m)-cross-tools-${target}-${version}.tar.xz"
+sudo tar -cJvf ${file_name}.tar.xz ${TARGET}
+sudo sha256sum ${file_name}.tar.xz | awk '{ print $1 }' > ${file_name}.tar.xz.sha256
