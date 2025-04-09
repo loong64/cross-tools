@@ -1,17 +1,17 @@
 # cross-tools
 
-Cross-compilation toolchain with glibc.
+LoongArch64 cross-compile toolchain, supports both x86_64(amd64) and aarch64(arm64) architectures.
 
 ## Supported targets
 
-| Version | Target                         | Kernel  | Binutils | GCC    | Libc(glibc) | Libc(musl) |
-|---------|--------------------------------|---------|----------|--------|-------------|------------|
-| legacy  | loongarch64-unknown-linux-gnu  | 5.19.16 | 2.39     | 12.4.0 | 2.36        |            |
-| legacy  | loongarch64-unknown-linux-musl | 5.19.16 | 2.39     | 12.4.0 |             | 1.2.5      |
-| stable  | loongarch64-unknown-linux-gnu  | 6.2.16  | 2.43.1   | 14.2.0 | 2.36        |            |
-| stable  | loongarch64-unknown-linux-musl | 6.2.16  | 2.43.1   | 14.2.0 |             | 1.2.5      |
-| latest  | loongarch64-unknown-linux-gnu  | 6.13    | 2.43.1   | 14.2.0 | 2.41        |            |
-| latest  | loongarch64-unknown-linux-musl | 6.13    | 2.43.1   | 14.2.0 |             | 1.2.5      |
+| Version    | Target                             | Kernel      | Binutils | GCC        | Libc(glibc) | Libc(musl) |
+|------------|------------------------------------|-------------|----------|------------|-------------|------------|
+| legacy     | loongarch64-unknown-linux-gnu      | 5.19.16     | 2.39     | 12.4.0     | 2.36        |            | 
+| ~~legacy~~ | ~~loongarch64-unknown-linux-musl~~ | ~~5.19.16~~ | ~~2.39~~ | ~~12.4.0~~ |             | ~~1.2.5~~  |
+| stable     | loongarch64-unknown-linux-gnu      | 6.2.16      | 2.43.1   | 14.2.0     | 2.36        |            |
+| stable     | loongarch64-unknown-linux-musl     | 6.2.16      | 2.43.1   | 14.2.0     |             | 1.2.5      |
+| latest     | loongarch64-unknown-linux-gnu      | 6.13        | 2.43.1   | 14.2.0     | 2.41        |            |
+| latest     | loongarch64-unknown-linux-musl     | 6.13        | 2.43.1   | 14.2.0     |             | 1.2.5      |
 
 
 ## How to use

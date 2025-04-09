@@ -20,6 +20,13 @@ jobs:
         target:
           - loongarch64-unknown-linux-gnu
           - loongarch64-unknown-linux-musl
+        exclude:
+          - os: ubuntu-22.04
+            version: legacy
+            target: loongarch64-unknown-linux-musl
+          - os: ubuntu-22.04-arm
+            version: legacy
+            target: loongarch64-unknown-linux-musl
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +35,7 @@ jobs:
       - name: Build
         run: |
           sudo rm -rf /opt/*
-          ./scripts/make ${{ matrix.version }}
+          ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
       - name: Generate file
         run: |
           file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
@@ -76,15 +83,15 @@ jobs:
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run:
+        run: |
+          set -x
           git config --global user.name "${GITHUB_ACTOR}"
           git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
           tag_name="$(date +%Y%m%d)"
           echo "tag_name=${tag_name}" >> $GITHUB_ENV
           git tag ${tag_name} || true
-          git push origin ${tag_name} --force || true
-          gh release create ${tag_name} --title "${tag_name}" --generate-notes
-
+          git push origin ${tag_name} || true
+          gh release create ${tag_name} --title "${tag_name}" --generate-notes || true
       - name: Upload artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

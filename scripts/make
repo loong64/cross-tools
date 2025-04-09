@@ -64,7 +64,7 @@ fi
 sudo mkdir -p /opt
 sudo chmod 0777 /opt
 mkdir -p build
-cp ${TARGET}/${VERSION}/.config build/.config
+cp targets/${TARGET}/${VERSION}/.config build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
 ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
