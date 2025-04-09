@@ -1,2 +1,40 @@
 # cross-tools
 
+Cross-compilation toolchain with glibc.
+
+## Supported targets
+
+| Version | Target                         | Kernel  | Binutils | GCC    | Glibc  |
+|---------|--------------------------------|---------|----------|--------|--------|
+| legacy  | loongarch64-unknown-linux-gnu  | 5.19.16 | 2.39     | 12.4.0 | 2.36   |
+| stable  | loongarch64-unknown-linux-gnu  | 6.2.16  | 2.43.1   | 14.2.0 | 2.36   |
+| latest  | loongarch64-unknown-linux-gnu  | 6.13    | 2.43.1   | 14.2.0 | 2.41   |
+
+
+## How to use
+
+Download the tarball from the [release page](https://github.com/loong64/cross-tools/releases) and extract it to `/opt/x-tools`:
+
+```sh
+sudo mkdir -p /opt/x-tools
+sudo tar -xf ${version}.tar.xz -C /opt/x-tools
+```
+
+## How to build
+
+Fork this project and create a new release, or build manually:
+
+```sh
+./scripts/make ${version}
+```
+
+## License
+
+MIT
+
+## Acknowledgements
+
+We would like to express our gratitude to the following individuals and projects:
+
+- [crosstool-ng](https://github.com/crosstool-ng/crosstool-ng)
+- [musl-cross](https://github.com/musl-cross/musl-cross)

@@ -6,9 +6,9 @@ on:
 jobs:
   build:
     name: Build
-    runs-on: ${ { matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os:
           - ubuntu-22.04
@@ -16,7 +16,7 @@ jobs:
         version:
           - legacy
           - stable
-          - default
+          - latest
         target:
           - loongarch64-unknown-linux-gnu
     steps:
@@ -32,6 +32,7 @@ jobs:
         run: |
           file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}.tar.xz"
           echo "file_name=${file_name}" >> $GITHUB_ENV
+          ls -al
 
       - name: Upload package
         uses: actions/upload-artifact@v4
