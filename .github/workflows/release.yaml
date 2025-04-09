@@ -19,6 +19,7 @@ jobs:
           - latest
         target:
           - loongarch64-unknown-linux-gnu
+          - loongarch64-unknown-linux-musl
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,7 +31,7 @@ jobs:
           ./scripts/make ${{ matrix.version }}
       - name: Generate file
         run: |
-          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}.tar.xz"
+          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
           echo "file_name=${file_name}" >> $GITHUB_ENV
           ls -al
 

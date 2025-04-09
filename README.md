@@ -4,11 +4,14 @@ Cross-compilation toolchain with glibc.
 
 ## Supported targets
 
-| Version | Target                         | Kernel  | Binutils | GCC    | Glibc  |
-|---------|--------------------------------|---------|----------|--------|--------|
-| legacy  | loongarch64-unknown-linux-gnu  | 5.19.16 | 2.39     | 12.4.0 | 2.36   |
-| stable  | loongarch64-unknown-linux-gnu  | 6.2.16  | 2.43.1   | 14.2.0 | 2.36   |
-| latest  | loongarch64-unknown-linux-gnu  | 6.13    | 2.43.1   | 14.2.0 | 2.41   |
+| Version | Target                         | Kernel  | Binutils | GCC    | Libc(glibc) | Libc(musl) |
+|---------|--------------------------------|---------|----------|--------|-------------|------------|
+| legacy  | loongarch64-unknown-linux-gnu  | 5.19.16 | 2.39     | 12.4.0 | 2.36        |            |
+| legacy  | loongarch64-unknown-linux-musl | 5.19.16 | 2.39     | 12.4.0 |             | 1.2.5      |
+| stable  | loongarch64-unknown-linux-gnu  | 6.2.16  | 2.43.1   | 14.2.0 | 2.36        |            |
+| stable  | loongarch64-unknown-linux-musl | 6.2.16  | 2.43.1   | 14.2.0 |             | 1.2.5      |
+| latest  | loongarch64-unknown-linux-gnu  | 6.13    | 2.43.1   | 14.2.0 | 2.41        |            |
+| latest  | loongarch64-unknown-linux-musl | 6.13    | 2.43.1   | 14.2.0 |             | 1.2.5      |
 
 
 ## How to use
@@ -17,7 +20,7 @@ Download the tarball from the [release page](https://github.com/loong64/cross-to
 
 ```sh
 sudo mkdir -p /opt/x-tools
-sudo tar -xf ${version}.tar.xz -C /opt/x-tools
+sudo tar -xf ${Target}.tar.xz -C /opt/x-tools
 ```
 
 ## How to build
@@ -25,7 +28,7 @@ sudo tar -xf ${version}.tar.xz -C /opt/x-tools
 Fork this project and create a new release, or build manually:
 
 ```sh
-./scripts/make ${version}
+./scripts/make ${Target}
 ```
 
 ## License

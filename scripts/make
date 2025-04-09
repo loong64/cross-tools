@@ -2,8 +2,17 @@
 
 set -e
 
-VERSION=$1
-TARGET=loongarch64-unknown-linux-gnu
+TARGET=$1
+VERSION=$2
+
+if [ -z "${VERSION}" ]; then
+    VERSION=stable
+fi
+
+if [ -z "${TARGET}" ]; then
+    echo "Usage: $0 <target> <version>"
+    exit 1
+fi
 
 # packages
 sudo apt-get update
@@ -55,7 +64,7 @@ fi
 sudo mkdir -p /opt
 sudo chmod 0777 /opt
 mkdir -p build
-cp ${VERSION}/.config build/.config
+cp ${TARGET}/${VERSION}/.config build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
 ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
@@ -65,6 +74,6 @@ popd
 sudo mv /opt/x-tools/${TARGET} .
 sudo chown -R root:root ${TARGET}
 
-FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}.tar.xz"
+FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}"
 sudo tar -cJf ${FILE_NAME}.tar.xz ${TARGET}
 sudo sha256sum ${FILE_NAME}.tar.xz | awk '{ print $1 }' > ${FILE_NAME}.tar.xz.sha256
