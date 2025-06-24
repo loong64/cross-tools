@@ -96,8 +96,8 @@ sudo mkdir -p /opt
 sudo chmod 0777 /opt
 mkdir -p build
 cp targets/${TARGET}/${VERSION}/.config build/.config
-# Add CT_HOST to the config file
-echo "CT_HOST=\"${HOST_PREFIX}\"" | tee -a build/.config
+# Replace CT_HOST="" to real HOST_PREFIX
+sed -i "s/CT_HOST=\"\"/CT_HOST=\"${HOST_PREFIX}\"/g" build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
 ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
