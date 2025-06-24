@@ -12,7 +12,10 @@ jobs:
       matrix:
         os:
           - ubuntu-22.04
-          - ubuntu-22.04-arm
+        host_arch:
+          - x86_64
+          - aarch64
+          - mingw-w64
         version:
           - legacy
           - stable
@@ -30,10 +33,10 @@ jobs:
       - name: Build
         run: |
           sudo rm -rf /opt/*
-          ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+          ./scripts/make ${{ matrix.target }} ${{ matrix.version }} ${{ matrix.host_arch }}
       - name: Generate file
         run: |
-          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
+          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}-${{ matrix.host_arch }}"
           echo "file_name=${file_name}" >> $GITHUB_ENV
           ls -al
 

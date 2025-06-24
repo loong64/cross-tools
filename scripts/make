@@ -4,19 +4,38 @@ set -e
 
 TARGET=$1
 VERSION=$2
+HOST_ARCH=$3
 
 if [ -z "${VERSION}" ]; then
     VERSION=stable
 fi
 
-if [ -z "${TARGET}" ]; then
-    echo "Usage: $0 <target> <version>"
+if [ -z "${TARGET}" ] || [ -z "${HOST_ARCH}" ]; then
+    echo "Usage: $0 <target> <version> <host-arch>"
     exit 1
 fi
+
+GCC_PACKAGE=""
+case $HOST_ARCH in
+    x86_64)
+        GCC_PACKAGE="gcc g++"
+        ;;
+    aarch64)
+        GCC_PACKAGE="gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
+        ;;
+    mingw-w64)
+        GCC_PACKAGE="gcc-mingw-w64 g++-mingw-w64"
+        ;;
+    *)
+        echo "Unsupported host architecture: ${HOST_ARCH}"
+        exit 1
+        ;;
+esac
 
 # packages
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
+    "$GCC_PACKAGE" \
     automake \
     bison \
     bzip2 \
