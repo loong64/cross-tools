@@ -19,12 +19,18 @@ GCC_PACKAGE=""
 case $HOST_ARCH in
     x86_64)
         GCC_PACKAGE="gcc g++"
+        HOST_CC="gcc"
+        HOST_CXX="g++"
         ;;
     aarch64)
         GCC_PACKAGE="gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
+        HOST_CC="aarch64-linux-gnu-gcc"
+        HOST_CXX="aarch64-linux-gnu-g++"
         ;;
     mingw-w64)
         GCC_PACKAGE="gcc-mingw-w64 g++-mingw-w64"
+        HOST_CC="x86_64-w64-mingw32-gcc-win32"
+        HOST_CXX="x86_64-w64-mingw32-g++-win32"
         ;;
     *)
         echo "Unsupported host architecture: ${HOST_ARCH}"
@@ -91,6 +97,8 @@ mkdir -p build
 cp targets/${TARGET}/${VERSION}/.config build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
+export CC="$HOST_CC"
+export CXX="$HOST_CXX"
 ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
 popd
 
