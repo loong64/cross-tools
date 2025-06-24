@@ -36,7 +36,7 @@ jobs:
           ./scripts/make ${{ matrix.target }} ${{ matrix.version }} ${{ matrix.host_arch }}
       - name: Generate file
         run: |
-          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}-${{ matrix.host_arch }}"
+          file_name="${{ matrix.host_arch }}-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
           echo "file_name=${file_name}" >> $GITHUB_ENV
           ls -al
 

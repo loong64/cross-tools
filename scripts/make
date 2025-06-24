@@ -107,6 +107,6 @@ popd
 sudo mv /opt/x-tools/${TARGET} .
 sudo chown -R root:root ${TARGET}
 
-FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}"
+FILE_NAME="${HOST_ARCH}-cross-tools-${TARGET}-${VERSION}"
 sudo tar -cJf ${FILE_NAME}.tar.xz ${TARGET}
 sudo sha256sum ${FILE_NAME}.tar.xz | awk '{ print $1 }' > ${FILE_NAME}.tar.xz.sha256
