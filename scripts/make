@@ -18,17 +18,20 @@ fi
 GCC_PACKAGE=""
 case $HOST_ARCH in
     x86_64)
-        GCC_PACKAGE="gcc g++"
+        GCC_PACKAGE="gcc"
+        GPP_PACKAGE="g++"
         HOST_CC="gcc"
         HOST_CXX="g++"
         ;;
     aarch64)
-        GCC_PACKAGE="gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
+        GCC_PACKAGE="gcc-aarch64-linux-gnu"
+        GPP_PACKAGE="g++-aarch64-linux-gnu"
         HOST_CC="aarch64-linux-gnu-gcc"
         HOST_CXX="aarch64-linux-gnu-g++"
         ;;
     mingw-w64)
-        GCC_PACKAGE="gcc-mingw-w64 g++-mingw-w64"
+        GCC_PACKAGE="gcc-mingw-w64"
+        GPP_PACKAGE="g++-mingw-w64"
         HOST_CC="x86_64-w64-mingw32-gcc-win32"
         HOST_CXX="x86_64-w64-mingw32-g++-win32"
         ;;
@@ -42,6 +45,7 @@ esac
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
     "$GCC_PACKAGE" \
+    "$GPP_PACKAGE" \
     automake \
     bison \
     bzip2 \
