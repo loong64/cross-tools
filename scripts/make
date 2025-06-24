@@ -101,8 +101,7 @@ mkdir -p build
 cp targets/${TARGET}/${VERSION}/.config build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
-export CC="$HOST_CC"
-export CXX="$HOST_CXX"
+export CT_CC="$HOST_CC"
 ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
 popd
 
