@@ -3,6 +3,9 @@ name: Release
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build
@@ -31,27 +34,23 @@ jobs:
         with:
           fetch-depth: 1
       - name: Build
+        id: build
         run: |
           sudo rm -rf /opt/*
           ./scripts/make ${{ matrix.target }} ${{ matrix.version }} ${{ matrix.host_arch }}
-      - name: Generate file
-        run: |
-          file_name="${{ matrix.host_arch }}-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
-          echo "file_name=${file_name}" >> $GITHUB_ENV
-          ls -al
 
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.file_name }}.tar.xz
-          path: ${{ env.file_name }}.tar.xz
+          name: ${{ steps.build.outputs.FILE_NAME }}.tar.xz
+          path: ${{ steps.build.outputs.FILE_NAME }}.tar.xz
           if-no-files-found: error
           retention-days: 1
       - name: Upload checksum
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.file_name }}.tar.xz.sha256
-          path: ${{ env.file_name }}.tar.xz.sha256
+          name: ${{ steps.build.outputs.FILE_NAME }}.tar.xz.sha256
+          path: ${{ steps.build.outputs.FILE_NAME }}.tar.xz.sha256
           if-no-files-found: error
           retention-days: 1
 
