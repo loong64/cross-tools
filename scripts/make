@@ -4,19 +4,45 @@ set -e
 
 TARGET=$1
 VERSION=$2
+HOST_ARCH=$3
 
 if [ -z "${VERSION}" ]; then
     VERSION=stable
 fi
 
-if [ -z "${TARGET}" ]; then
-    echo "Usage: $0 <target> <version>"
+if [ -z "${TARGET}" ] || [ -z "${HOST_ARCH}" ]; then
+    echo "Usage: $0 <target> <version> <host-arch>"
     exit 1
 fi
+
+GCC_PACKAGE=""
+case $HOST_ARCH in
+    x86_64)
+        GCC_PACKAGE="gcc"
+        GPP_PACKAGE="g++"
+        HOST_PREFIX="x86_64-linux-gnu"
+        ;;
+    aarch64)
+        GCC_PACKAGE="gcc-aarch64-linux-gnu"
+        GPP_PACKAGE="g++-aarch64-linux-gnu"
+        HOST_PREFIX="aarch64-linux-gnu"
+        ;;
+    mingw-w64)
+        GCC_PACKAGE="gcc-mingw-w64-x86-64-win32"
+        GPP_PACKAGE="g++-mingw-w64-x86-64-win32"
+        HOST_PREFIX="x86_64-w64-mingw32"
+        ;;
+    *)
+        echo "Unsupported host architecture: ${HOST_ARCH}"
+        exit 1
+        ;;
+esac
 
 # packages
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
+    "$GCC_PACKAGE" \
+    "$GPP_PACKAGE" \
     automake \
     bison \
     bzip2 \
@@ -70,6 +96,8 @@ sudo mkdir -p /opt
 sudo chmod 0777 /opt
 mkdir -p build
 cp targets/${TARGET}/${VERSION}/.config build/.config
+# Replace CT_HOST="" to real HOST_PREFIX
+sed -i "s/CT_HOST=\"\"/CT_HOST=\"${HOST_PREFIX}\"/g" build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
 ct-ng build || { tail -n 500 build.log; exit $ERRCODE; }
@@ -79,6 +107,7 @@ popd
 sudo mv /opt/x-tools/${TARGET} .
 sudo chown -R root:root ${TARGET}
 
-FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}"
+FILE_NAME="${HOST_PREFIX}-cross-tools-${TARGET}-${VERSION}"
+echo "FILE_NAME=${FILE_NAME}" >> "$GITHUB_OUTPUT"
 sudo tar -cJf ${FILE_NAME}.tar.xz ${TARGET}
 sudo sha256sum ${FILE_NAME}.tar.xz | awk '{ print $1 }' > ${FILE_NAME}.tar.xz.sha256
