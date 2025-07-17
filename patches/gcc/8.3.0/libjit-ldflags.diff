@@ -1,0 +1,13 @@
+Index: b/src/gcc/jit/Make-lang.in
+===================================================================
+--- a/src/gcc/jit/Make-lang.in
++++ b/src/gcc/jit/Make-lang.in
+@@ -99,7 +99,7 @@ $(LIBGCCJIT_FILENAME): $(jit_OBJS) \
+ 	     $(CPPLIB) $(LIBDECNUMBER) $(EXTRA_GCC_LIBS) $(LIBS) $(BACKENDLIBS) \
+ 	     $(EXTRA_GCC_OBJS) \
+ 	     $(LIBGCCJIT_VERSION_SCRIPT_OPTION) \
+-	     $(LIBGCCJIT_SONAME_OPTION)
++	     $(LIBGCCJIT_SONAME_OPTION) $(LDFLAGS)
+ 
+ $(LIBGCCJIT_SONAME_SYMLINK): $(LIBGCCJIT_FILENAME)
+ 	ln -sf $(LIBGCCJIT_FILENAME) $(LIBGCCJIT_SONAME_SYMLINK)

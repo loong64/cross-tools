@@ -1,0 +1,59 @@
+# DP: Default to -fstack-protector-strong starting with Ubuntu 14.10.
+
+Index: b/src/gcc/gcc.c
+===================================================================
+--- a/src/gcc/gcc.c
++++ b/src/gcc/gcc.c
+@@ -872,7 +872,7 @@ proper position among the other output f
+ 
+ #ifndef SSP_DEFAULT_SPEC
+ #if defined(TARGET_LIBC_PROVIDES_SSP) && !defined(ACCEL_COMPILER)
+-#define SSP_DEFAULT_SPEC "%{!fno-stack-protector:%{!fstack-protector-all:%{!ffreestanding:%{!nostdlib:-fstack-protector}}}} " FORMAT_SECURITY_SPEC
++#define SSP_DEFAULT_SPEC "%{!fno-stack-protector:%{!fstack-protector-all:%{!ffreestanding:%{!nostdlib:%{!fstack-protector:-fstack-protector-strong}}}}} " FORMAT_SECURITY_SPEC
+ #else
+ #define SSP_DEFAULT_SPEC FORMAT_SECURITY_SPEC
+ #endif
+Index: b/src/gcc/doc/invoke.texi
+===================================================================
+--- a/src/gcc/doc/invoke.texi
++++ b/src/gcc/doc/invoke.texi
+@@ -9549,6 +9549,11 @@ branch target registers within any basic
+ Optimize the prologue of variadic argument functions with respect to usage of
+ those arguments.
+ 
++NOTE: In Ubuntu 14.10 and later versions,
++@option{-fstack-protector-strong} is enabled by default for C,
++C++, ObjC, ObjC++, if none of @option{-fno-stack-protector},
++@option{-nostdlib}, nor @option{-ffreestanding} are found.
++
+ @item -fsection-anchors
+ @opindex fsection-anchors
+ Try to reduce the number of symbolic address calculations by using
+@@ -10151,13 +10156,13 @@ value of a shared integer constant.  The
+ The minimum size of buffers (i.e.@: arrays) that receive stack smashing
+ protection when @option{-fstack-protection} is used.
+ 
++This default before Ubuntu 10.10 was "8". Currently it is "4", to increase
++the number of functions protected by the stack protector.
++
+ @item min-size-for-stack-sharing
+ The minimum size of variables taking part in stack slot sharing when not
+ optimizing. The default value is 32.
+ 
+-This default before Ubuntu 10.10 was "8". Currently it is "4", to increase
+-the number of functions protected by the stack protector.
+-
+ @item max-jump-thread-duplication-stmts
+ Maximum number of statements allowed in a block that needs to be
+ duplicated when threading jumps.
+@@ -11162,10 +11167,6 @@ functions with buffers larger than 8 byt
+ when a function is entered and then checked when the function exits.
+ If a guard check fails, an error message is printed and the program exits.
+ 
+-NOTE: In Ubuntu 6.10 and later versions this option is enabled by default
+-for C, C++, ObjC, ObjC++, if none of @option{-fno-stack-protector},
+-@option{-nostdlib}, nor @option{-ffreestanding} are found.
+-
+ @item -fstack-protector-all
+ @opindex fstack-protector-all
+ Like @option{-fstack-protector} except that all functions are protected.

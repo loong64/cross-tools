@@ -1,0 +1,39 @@
+# DP: For ICEs, dump the preprocessed source file to stderr
+# DP: when in a distro build environment.
+
+--- a/src/gcc/gcc.c
++++ b/src/gcc/gcc.c
+@@ -3187,7 +3187,8 @@ execute (void)
+ 	    /* For ICEs in cc1, cc1obj, cc1plus see if it is
+ 	       reproducible or not.  */
+ 	    const char *p;
+-	    if (flag_report_bug
++	    const char *deb_build_options = env.get("DEB_BUILD_OPTIONS");
++	    if ((flag_report_bug || deb_build_options)
+ 		&& WEXITSTATUS (status) == ICE_EXIT_CODE
+ 		&& i == 0
+ 		&& (p = strrchr (commands[0].argv[0], DIR_SEPARATOR))
+@@ -6950,8 +6951,23 @@ do_report_bug (const char **new_argv, co
+ 
+   if (status == ATTEMPT_STATUS_SUCCESS)
+     {
++      const char *deb_build_options = env.get("DEB_BUILD_OPTIONS");
++
+       fnotice (stderr, "Preprocessed source stored into %s file,"
+ 	       " please attach this to your bugreport.\n", *out_file);
++      if (deb_build_options)
++	{
++	  char *cmd = XNEWVEC (char, 50 + strlen (*out_file));
++
++	  sprintf(cmd, "/usr/bin/awk '{print \"%d:\", $0}' %s >&2", getpid(), *out_file);
++	  fprintf(stderr, "=== BEGIN GCC DUMP ===\n");
++	  fflush(stderr);
++	  system(cmd);
++	  fflush(stderr);
++	  fprintf(stderr, "=== END GCC DUMP ===\n");
++	  fflush(stderr);
++	  free(cmd);
++	}
+       /* Make sure it is not deleted.  */
+       free (*out_file);
+       *out_file = NULL;

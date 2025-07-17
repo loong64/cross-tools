@@ -1,0 +1,116 @@
+# DP : Don't add the __LINARO_RELEASE__ and __LINARO_SPIN__ macros for distro builds.
+
+--- a/src/gcc/cppbuiltin.c
++++ b/src/gcc/cppbuiltin.c
+@@ -53,41 +53,18 @@ parse_basever (int *major, int *minor, i
+     *patchlevel = s_patchlevel;
+ }
+ 
+-/* Parse a LINAROVER version string of the format "M.m-year.month[-spin][~dev]"
+-   to create Linaro release number YYYYMM and spin version.  */
+-static void
+-parse_linarover (int *release, int *spin)
+-{
+-  static int s_year = -1, s_month, s_spin;
+-
+-  if (s_year == -1)
+-    if (sscanf (LINAROVER, "%*[^-]-%d.%d-%d", &s_year, &s_month, &s_spin) != 3)
+-      {
+-	sscanf (LINAROVER, "%*[^-]-%d.%d", &s_year, &s_month);
+-	s_spin = 0;
+-      }
+-
+-  if (release)
+-    *release = s_year * 100 + s_month;
+-
+-  if (spin)
+-    *spin = s_spin;
+-}
+ 
+ /* Define __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__ and __VERSION__.  */
+ static void
+ define__GNUC__ (cpp_reader *pfile)
+ {
+-  int major, minor, patchlevel, linaro_release, linaro_spin;
++  int major, minor, patchlevel;
+ 
+   parse_basever (&major, &minor, &patchlevel);
+-  parse_linarover (&linaro_release, &linaro_spin);
+   cpp_define_formatted (pfile, "__GNUC__=%d", major);
+   cpp_define_formatted (pfile, "__GNUC_MINOR__=%d", minor);
+   cpp_define_formatted (pfile, "__GNUC_PATCHLEVEL__=%d", patchlevel);
+   cpp_define_formatted (pfile, "__VERSION__=\"%s\"", version_string);
+-  cpp_define_formatted (pfile, "__LINARO_RELEASE__=%d", linaro_release);
+-  cpp_define_formatted (pfile, "__LINARO_SPIN__=%d", linaro_spin);
+   cpp_define_formatted (pfile, "__ATOMIC_RELAXED=%d", MEMMODEL_RELAXED);
+   cpp_define_formatted (pfile, "__ATOMIC_SEQ_CST=%d", MEMMODEL_SEQ_CST);
+   cpp_define_formatted (pfile, "__ATOMIC_ACQUIRE=%d", MEMMODEL_ACQUIRE);
+--- a/src/gcc/Makefile.in
++++ b/src/gcc/Makefile.in
+@@ -854,12 +854,10 @@ BASEVER     := $(srcdir)/BASE-VER  # 4.x
+ DEVPHASE    := $(srcdir)/DEV-PHASE # experimental, prerelease, ""
+ DATESTAMP   := $(srcdir)/DATESTAMP # YYYYMMDD or empty
+ REVISION    := $(srcdir)/REVISION  # [BRANCH revision XXXXXX]
+-LINAROVER   := $(srcdir)/LINARO-VERSION # M.x-YYYY.MM[-S][~dev]
+ 
+ BASEVER_c   := $(shell cat $(BASEVER))
+ DEVPHASE_c  := $(shell cat $(DEVPHASE))
+ DATESTAMP_c := $(shell cat $(DATESTAMP))
+-LINAROVER_c := $(shell cat $(LINAROVER))
+ 
+ ifeq (,$(wildcard $(REVISION)))
+ REVISION_c  :=
+@@ -886,7 +884,6 @@ DATESTAMP_s := \
+   "\"$(if $(DEVPHASE_c)$(filter-out 0,$(PATCHLEVEL_c)), $(DATESTAMP_c))\""
+ PKGVERSION_s:= "\"@PKGVERSION@\""
+ BUGURL_s    := "\"@REPORT_BUGS_TO@\""
+-LINAROVER_s := "\"$(LINAROVER_c)\""
+ 
+ PKGVERSION  := @PKGVERSION@
+ BUGURL_TEXI := @REPORT_BUGS_TEXI@
+@@ -2886,9 +2883,8 @@ PREPROCESSOR_DEFINES = \
+   -DSTANDARD_EXEC_PREFIX=\"$(libdir)/gcc/\" \
+   @TARGET_SYSTEM_ROOT_DEFINE@
+ 
+-CFLAGS-cppbuiltin.o += $(PREPROCESSOR_DEFINES) -DBASEVER=$(BASEVER_s) \
+-	-DLINAROVER=$(LINAROVER_s)
+-cppbuiltin.o: $(BASEVER) $(LINAROVER)
++CFLAGS-cppbuiltin.o += $(PREPROCESSOR_DEFINES) -DBASEVER=$(BASEVER_s)
++cppbuiltin.o: $(BASEVER)
+ 
+ CFLAGS-cppdefault.o += $(PREPROCESSOR_DEFINES)
+ 
+--- a/src/gcc/LINARO-VERSION
++++ /dev/null
+@@ -1 +0,0 @@
+-8.2-2018.08~dev
+--- a/src/gcc/testsuite/ChangeLog.arm
++++ b/src/gcc/testsuite/ChangeLog.arm
+@@ -3,10 +3,6 @@
+ 	* c-c++-common/spec-barrier-1.c: New test.
+ 	* c-c++-common/spec-barrier-2.c: New test.
+ 	* gcc.dg/spec-barrier-3.c: New test.
+-
+-2018-08-14  Yvan Roux  <yvan.roux@linaro.org>
+-
+-	* gcc.dg/cpp/linaro-macros.c: New test.
+ 
+ Copyright (C) 2018 Free Software Foundation, Inc.
+ 
+--- a/src/gcc/testsuite/gcc.dg/cpp/linaro-macros.c
++++ /dev/null
+@@ -1,14 +0,0 @@
+-/* Test __LINARO_RELEASE__ and __LINARO_SPIN__.  */
+-/* { dg-do compile } */
+-
+-#if defined(__LINARO_RELEASE__) && __LINARO_RELEASE__ >= 201808
+-int i;
+-#else
+-#error "Bad __LINARO_RELEASE__."
+-#endif
+-
+-#if defined(__LINARO_SPIN__) && __LINARO_SPIN__ >= 0
+-int j;
+-#else
+-#error "Bad __LINARO_SPIN__."
+-#endif

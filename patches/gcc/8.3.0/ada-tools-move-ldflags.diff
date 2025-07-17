@@ -1,0 +1,42 @@
+Description: For Ada tools, move LDFLAGS from GCC_LINK to TOOLS_LIBS.
+ Gnatlink moves GCC_LINK linker options after other options,
+ probably so that standard libraries come after user libraries
+ in case --as-needed is activated.
+ However, if --as-needed is activated via LDFLAGS, it is appended via
+ GCC_LINK and comes too late on the eventual command line.
+ All GCC_LINKS expansions but one are followed by an expansion of
+ TOOLS_LIBS, so TOOLS_LIBS seems to be the right place for LDFLAGS.
+Author: Nicolas Boulenguez <nicolas@debian.org>
+Forwarded: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81104
+
+Index: b/src/gcc/ada/gcc-interface/Makefile.in
+===================================================================
+--- a/src/gcc/ada/gcc-interface/Makefile.in
++++ b/src/gcc/ada/gcc-interface/Makefile.in
+@@ -247,7 +247,7 @@ LIBS = $(LIBINTL) $(LIBICONV) $(LIBBACKT
+ LIBDEPS = $(LIBINTL_DEP) $(LIBICONV_DEP) $(LIBBACKTRACE) $(LIBIBERTY)
+ # Default is no TGT_LIB; one might be passed down or something
+ TGT_LIB =
+-TOOLS_LIBS = ../link.o ../targext.o ../../ggc-none.o ../../libcommon-target.a \
++TOOLS_LIBS = $(LDFLAGS) ../link.o ../targext.o ../../ggc-none.o ../../libcommon-target.a \
+   ../../libcommon.a ../../../libcpp/libcpp.a $(LIBGNAT) $(LIBINTL) $(LIBICONV) \
+   ../$(LIBBACKTRACE) ../$(LIBIBERTY) $(SYSLIBS) $(TGT_LIB)
+ 
+@@ -2150,7 +2150,7 @@ TOOLS_FLAGS_TO_PASS=		\
+ 	"GNATLINK=$(GNATLINK)"	\
+ 	"GNATBIND=$(GNATBIND)"
+ 
+-GCC_LINK=$(CXX) $(GCC_LINK_FLAGS) $(LDFLAGS)
++GCC_LINK=$(CXX) $(GCC_LINK_FLAGS)
+ 
+ # Build directory for the tools. Let's copy the target-dependent
+ # sources using the same mechanism as for gnatlib. The other sources are
+@@ -2250,7 +2250,7 @@ common-tools: ../stamp-tools
+ 	$(GNATMAKE) -c  $(ADA_INCLUDES) vxaddr2line --GCC="$(CC) $(ALL_ADAFLAGS)"
+ 	$(GNATBIND) $(ADA_INCLUDES) $(GNATBIND_FLAGS) vxaddr2line
+ 	$(GNATLINK) -v vxaddr2line -o $@ \
+-	  --GCC="$(CC) $(ADA_INCLUDES)" --LINK="$(GCC_LINK)" ../targext.o $(CLIB)
++	  --GCC="$(CC) $(ADA_INCLUDES)" --LINK="$(GCC_LINK)" ../targext.o $(CLIB) $(LDFLAGS)
+ 
+ gnatmake-re: ../stamp-tools
+ 	$(GNATMAKE) -j0 $(ADA_INCLUDES) -u sdefault --GCC="$(CC) $(MOST_ADA_FLAGS)"

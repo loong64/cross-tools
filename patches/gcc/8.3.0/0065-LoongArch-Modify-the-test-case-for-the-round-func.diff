@@ -1,0 +1,51 @@
+From 295e7e7c8c9803aa781e47b6843f83327fa5e8da Mon Sep 17 00:00:00 2001
+From: chenxiaolong <chenxiaolong@loongson.cn>
+Date: Thu, 31 Oct 2024 16:05:47 +0800
+Subject: [PATCH v1] LoongArch: Modify the test case for the round function.
+
+Change-Id: Ia7700458ddd6977200ccd725db86beba30e64bb2
+---
+ src/gcc/testsuite/gcc.target/loongarch/round-lasx.c | 13 +++++++++++++
+ .../gcc.target/loongarch/{round.c => round-lsx.c}   |  2 +-
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/round-lasx.c
+ rename src/gcc/testsuite/gcc.target/loongarch/{round.c => round-lsx.c} (97%)
+
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/round-lasx.c b/src/gcc/testsuite/gcc.target/loongarch/round-lasx.c
+new file mode 100644
+index 000000000..c74205855
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/round-lasx.c
+@@ -0,0 +1,13 @@
++/* { dg-do compile } */
++/* { dg-options "-Ofast -mlasx" } */
++/* { dg-final { scan-assembler-not "xvfrint" } } */
++
++float roundf (float x);
++float b[16];
++void
++test (float a[16])
++{
++  for (int i = 0; i < 16; i++)
++    b[i] = roundf (a[i]);
++}
++
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/round.c b/src/gcc/testsuite/gcc.target/loongarch/round-lsx.c
+similarity index 97%
+rename from src/gcc/testsuite/gcc.target/loongarch/round.c
+rename to src/gcc/testsuite/gcc.target/loongarch/round-lsx.c
+index eea582dae..9f761b605 100644
+--- a/src/gcc/testsuite/gcc.target/loongarch/round.c
++++ b/src/gcc/testsuite/gcc.target/loongarch/round-lsx.c
+@@ -4,7 +4,7 @@
+ 
+ float roundf (float x);
+ float b[16];
+-float
++void
+ test (float a[16])
+ {
+   for (int i = 0; i < 16; i++)
+-- 
+2.20.1
+

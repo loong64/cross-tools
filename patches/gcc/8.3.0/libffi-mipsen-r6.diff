@@ -1,0 +1,44 @@
+# DP: libffi: mips/n32.S: disable .set mips4 on mips r6
+
+Index: b/src/libffi/src/mips/n32.S
+===================================================================
+--- a/src/libffi/src/mips/n32.S
++++ b/src/libffi/src/mips/n32.S
+@@ -43,7 +43,9 @@
+ #ifdef __GNUC__
+ 	.abicalls
+ #endif
++#if !defined(__mips_isa_rev) || (__mips_isa_rev<6)
+ 	.set mips4
++#endif
+ 	.text
+ 	.align	2
+ 	.globl	ffi_call_N32
+Index: b/src/libffi/src/mips/ffi.c
+===================================================================
+--- a/src/libffi/src/mips/ffi.c
++++ b/src/libffi/src/mips/ffi.c
+@@ -698,7 +698,11 @@ ffi_prep_closure_loc (ffi_closure *closu
+   /* lui  $12,high(codeloc) */
+   tramp[2] = 0x3c0c0000 | ((unsigned)codeloc >> 16);
+   /* jr   $25          */
++#if !defined(__mips_isa_rev) || (__mips_isa_rev<6)
+   tramp[3] = 0x03200008;
++#else
++  tramp[3] = 0x03200009;
++#endif
+   /* ori  $12,low(codeloc)  */
+   tramp[4] = 0x358c0000 | ((unsigned)codeloc & 0xffff);
+ #else
+@@ -726,7 +730,11 @@ ffi_prep_closure_loc (ffi_closure *closu
+   /* ori  $25,low(fn)  */
+   tramp[10] = 0x37390000 | ((unsigned long)fn  & 0xffff);
+   /* jr   $25          */
++#if !defined(__mips_isa_rev) || (__mips_isa_rev<6)
+   tramp[11] = 0x03200008;
++#else
++  tramp[11] = 0x03200009;
++#endif
+   /* ori  $12,low(codeloc)  */
+   tramp[12] = 0x358c0000 | ((unsigned long)codeloc & 0xffff);
+ 

@@ -1,0 +1,49 @@
+# DP: Skip non-default multilib and libstdc++-v3 debug builds in bootstrap builds
+
+Index: b/src/config-ml.in
+===================================================================
+--- a/src/config-ml.in
++++ b/src/config-ml.in
+@@ -479,6 +479,17 @@ esac
+ # Tests like `if [ -n "$multidirs" ]' require it.
+ multidirs=`echo "$multidirs" | sed -e 's/^[ ][ ]*//' -e 's/[ ][ ]*$//' -e 's/[ ][ ]*/ /g'`
+ 
++# stage1 and stage2 builds of the non-default multilib configurations
++# are not needed; skip these to save some build time.
++if [ -f ../../stage_final ] && [ -f ../../stage_current ]; then
++    stage_final=`cat ../../stage_final`
++    stage_current=`cat ../../stage_current`
++    if [ "$stage_current" != "$stage_final" ]; then
++	echo "Skip `basename $ml_realsrcdir` non-default multilibs for bootstrap stage $stage_current"
++	multidirs=
++    fi
++fi
++
+ # Add code to library's top level makefile to handle building the multilib
+ # subdirs.
+ 
+Index: b/src/libstdc++-v3/acinclude.m4
+===================================================================
+--- a/src/libstdc++-v3/acinclude.m4
++++ b/src/libstdc++-v3/acinclude.m4
+@@ -2895,7 +2895,20 @@ dnl
+ AC_DEFUN([GLIBCXX_ENABLE_DEBUG], [
+   AC_MSG_CHECKING([for additional debug build])
+   GLIBCXX_ENABLE(libstdcxx-debug,$1,,[build extra debug library])
++  if test x$enable_libstdcxx_debug = xyes; then
++    if test -f $toplevel_builddir/../stage_final && test -f $toplevel_builddir/../stage_current; then
++      stage_final=`cat $toplevel_builddir/../stage_final`
++      stage_current=`cat $toplevel_builddir/../stage_current`
++      if test x$stage_current != x$stage_final ; then
++	skip_debug_build=yes
++	enable_libstdcxx_debug=no
++      fi
++    fi
++  fi
+   AC_MSG_RESULT($enable_libstdcxx_debug)
++  if test x$skip_debug_build = xyes ; then
++    AC_MSG_NOTICE([Skip libstdc++-v3 debug build for bootstrap stage $stage_current])
++  fi
+   GLIBCXX_CONDITIONAL(GLIBCXX_BUILD_DEBUG, test $enable_libstdcxx_debug = yes)
+ ])
+ 

@@ -1,0 +1,13 @@
+# DP: Build idgen.dmdgen.o with the build compiler
+
+--- a/src/gcc/d/Make-lang.in
++++ b/src/gcc/d/Make-lang.in
+@@ -315,7 +315,7 @@
+ 	+$(LINKER_FOR_BUILD) $(BUILD_LINKER_FLAGS) $(BUILD_LDFLAGS) -o $@ $^
+ 
+ d/idgen.dmdgen.o: d/dfrontend/idgen.c
+-	$(filter-out -fprofile-%,$(DMD_COMPILE)) $(D_INCLUDES) $<
++	$(filter-out -fprofile-%,$(DMDGEN_COMPILE)) $(D_INCLUDES) $<
+ 	$(POSTCOMPILE)
+ 
+ d/impcnvgen.dmdgen.o: $(srcdir)/d/dfrontend/impcnvgen.c

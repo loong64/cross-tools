@@ -1,0 +1,141 @@
+From f2f1d4138903148caeb145d0542f46e97eda5393 Mon Sep 17 00:00:00 2001
+From: qijingwen <qijingwen@loongson.cn>
+Date: Sat, 31 Dec 2022 10:56:49 +0800
+Subject: [PATCH 23/28] LoongArch: Do not generate aligned code by default when
+ implementing memcpy inline.
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.c (loongarch_block_move_straight): Don't generate aligned code by default.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/memcpy-inline-noalign.c: New test.
+	* gcc.target/loongarch/memcpy-inline-lasx-strict-align.c: New test.
+	* gcc.target/loongarch/memcpy-inline-lasx.c: New test.
+	* gcc.target/loongarch/memcpy-inline-strict-align.c: New test.
+
+Change-Id: Icb7ea0bfeb566e14af264d77406b1fff0ba1f09d
+---
+ src/gcc/config/loongarch/loongarch.c              | 15 +++++++++------
+ .../loongarch/memcpy-inline-lasx-strict-align.c   |  9 +++++++++
+ .../gcc.target/loongarch/memcpy-inline-lasx.c     |  9 +++++++++
+ .../gcc.target/loongarch/memcpy-inline-noalign.c  |  9 +++++++++
+ .../loongarch/memcpy-inline-strict-align.c        |  9 +++++++++
+ 5 files changed, 45 insertions(+), 6 deletions(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx-strict-align.c
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx.c
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-noalign.c
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-strict-align.c
+
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index 9c13d1be7..48ca5c2fb 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -5040,10 +5040,13 @@ loongarch_block_move_straight (rtx dest, rtx src, HOST_WIDE_INT length)
+   int i;
+   machine_mode mode;
+   rtx *regs;
++  
++  if (STRICT_ALIGNMENT)
++    bits = MIN (BITS_PER_WORD, MIN (MEM_ALIGN (src), MEM_ALIGN (dest)));
++  else 
++    bits = BITS_PER_WORD;
+ 
+-  bits = MIN (BITS_PER_WORD, MIN (MEM_ALIGN (src), MEM_ALIGN (dest)));
+-
+-  if (ISA_HAS_LASX)
++  if (ISA_HAS_LASX && !STRICT_ALIGNMENT)
+     {
+       bits = BITS_PER_WORD * 4;
+       mode = V4DImode;
+@@ -5060,7 +5063,7 @@ loongarch_block_move_straight (rtx dest, rtx src, HOST_WIDE_INT length)
+ 
+   /* Load as many BITS-sized chunks as possible.  Use a normal load if
+      the source has enough alignment, otherwise use left/right pairs.  */
+-  if (ISA_HAS_LASX)
++  if (ISA_HAS_LASX && !STRICT_ALIGNMENT)
+     {
+       for (offset = 0, i = 0; offset + delta <= length; offset += delta, i++)
+ 	{
+@@ -5078,7 +5081,7 @@ loongarch_block_move_straight (rtx dest, rtx src, HOST_WIDE_INT length)
+     }
+ 
+   /* Copy the chunks to the destination.  */
+-  if (ISA_HAS_LASX)
++  if (ISA_HAS_LASX && !STRICT_ALIGNMENT)
+     {
+ 
+       for (offset = 0, i = 0; offset + delta <= length; offset += delta, i++)
+@@ -5096,7 +5099,7 @@ loongarch_block_move_straight (rtx dest, rtx src, HOST_WIDE_INT length)
+   /* Mop up any left-over bytes.  */
+   if (offset < length)
+     {
+-      if (ISA_HAS_LASX)
++      if (ISA_HAS_LASX && !STRICT_ALIGNMENT)
+ 	{
+ 	  if (length - offset >= 16)
+ 	    {
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx-strict-align.c b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx-strict-align.c
+new file mode 100644
+index 000000000..a7405d6cf
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx-strict-align.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -mlasx -mstrict-align" } */
++/* { dg-final { scan-assembler-not "xvld" } } */
++
++#include <string.h>
++
++void mycpy(int *a, int *b) {
++  memcpy(a, b, 256); 
++}
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx.c b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx.c
+new file mode 100644
+index 000000000..10b7ef13f
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-lasx.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -mno-strict-align -mlasx" } */
++/* { dg-final { scan-assembler "xvld" } } */
++
++#include <string.h>
++
++void mycpy(int *a, int *b) {
++  memcpy(a, b, 256); 
++}
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-noalign.c b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-noalign.c
+new file mode 100644
+index 000000000..8fe589cc0
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-noalign.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-options "-O3" } */
++/* { dg-final { scan-assembler-not "ld.bu" } } */
++
++#include <string.h>
++
++void mycpy(int *a, int *b) {
++  memcpy(a, b, 256); 
++}
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-strict-align.c b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-strict-align.c
+new file mode 100644
+index 000000000..8696825ab
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/memcpy-inline-strict-align.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -mstrict-align" } */
++/* { dg-final { scan-assembler "ld.bu" } } */
++
++#include <string.h>
++
++void mycpy(int *a, int *b) {
++  memcpy(a, b, 256); 
++}
+-- 
+2.31.1
+

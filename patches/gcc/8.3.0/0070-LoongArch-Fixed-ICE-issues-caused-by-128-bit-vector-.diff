@@ -1,0 +1,157 @@
+From 4f95edbc3b02459f8f24ce5af667445f96dd96ce Mon Sep 17 00:00:00 2001
+From: chenxiaolong <chenxiaolong@loongson.cn>
+Date: Sat, 22 Mar 2025 16:06:31 +0800
+Subject: [PATCH 1/2] LoongArch: Fixed ICE issues caused by 128-bit vector
+ parameter passing.
+
+Change-Id: I6ac157f645af84d4e2d7753fd1c2b7d98d23ac9a
+---
+ src/gcc/config/loongarch/lasx.md              |  2 +-
+ src/gcc/config/loongarch/loongarch-protos.h   |  3 +-
+ src/gcc/config/loongarch/loongarch.c          | 38 +------------------
+ src/gcc/config/loongarch/lsx.md               |  8 ++--
+ .../gcc.target/loongarch/test-mask_set_test.c | 13 +++++++
+ 5 files changed, 20 insertions(+), 44 deletions(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/test-mask_set_test.c
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index 8da474b62..b141863eb 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -884,7 +884,7 @@
+    && loongarch_split_move_insn_p (operands[0], operands[1])"
+   [(const_int 0)]
+ {
+-  loongarch_split_move_insn (operands[0], operands[1], curr_insn);
++  loongarch_split_move (operands[0], operands[1]);
+   DONE;
+ })
+ 
+diff --git a/src/gcc/config/loongarch/loongarch-protos.h b/src/gcc/config/loongarch/loongarch-protos.h
+index 2fb1d1c30..4da408e97 100644
+--- a/src/gcc/config/loongarch/loongarch-protos.h
++++ b/src/gcc/config/loongarch/loongarch-protos.h
+@@ -72,9 +72,8 @@ extern rtx loongarch_legitimize_call_address (rtx);
+ 
+ extern rtx loongarch_subword (rtx, bool);
+ extern bool loongarch_split_move_p (rtx, rtx);
+-extern void loongarch_split_move (rtx, rtx, rtx);
++extern void loongarch_split_move (rtx, rtx);
+ extern bool loongarch_split_move_insn_p (rtx, rtx);
+-extern void loongarch_split_move_insn (rtx, rtx, rtx);
+ extern void loongarch_split_128bit_move (rtx, rtx);
+ extern bool loongarch_split_128bit_move_p (rtx, rtx);
+ extern void loongarch_split_256bit_move (rtx, rtx);
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index ced8b5c74..f44cf9098 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -3824,7 +3824,7 @@ loongarch_split_move_p (rtx dest, rtx src)
+ /* Split a move from SRC to DEST, given that loongarch_split_move_p holds.  */
+ 
+ void
+-loongarch_split_move (rtx dest, rtx src, rtx insn_)
++loongarch_split_move (rtx dest, rtx src)
+ {
+   rtx low_dest;
+ 
+@@ -3862,33 +3862,6 @@ loongarch_split_move (rtx dest, rtx src, rtx insn_)
+ 			       loongarch_subword (src, true));
+ 	}
+     }
+-
+-  /* This is a hack.  See if the next insn uses DEST and if so, see if we
+-     can forward SRC for DEST.  This is most useful if the next insn is a
+-     simple store.  */
+-  rtx_insn *insn = (rtx_insn *) insn_;
+-  struct loongarch_address_info addr = {};
+-  if (insn)
+-    {
+-      rtx_insn *next = next_nonnote_nondebug_insn_bb (insn);
+-      if (next)
+-	{
+-	  rtx set = single_set (next);
+-	  if (set && SET_SRC (set) == dest)
+-	    {
+-	      if (MEM_P (src))
+-		{
+-		  rtx tmp = XEXP (src, 0);
+-		  loongarch_classify_address (&addr, tmp, GET_MODE (tmp),
+-					      true);
+-		  if (addr.reg && !reg_overlap_mentioned_p (dest, addr.reg))
+-		    validate_change (next, &SET_SRC (set), src, false);
+-		}
+-	      else
+-		validate_change (next, &SET_SRC (set), src, false);
+-	    }
+-	}
+-    }
+ }
+ 
+ /* Return true if a 128-bit move from SRC to DEST should be split.  */
+@@ -4212,15 +4185,6 @@ loongarch_split_move_insn_p (rtx dest, rtx src)
+   return loongarch_split_move_p (dest, src);
+ }
+ 
+-/* Split a move from SRC to DEST in INSN, given that
+-   loongarch_split_move_insn_p holds.  */
+-
+-void
+-loongarch_split_move_insn (rtx dest, rtx src, rtx insn)
+-{
+-  loongarch_split_move (dest, src, insn);
+-}
+-
+ /* Implement TARGET_CONSTANT_ALIGNMENT.  */
+ 
+ static HOST_WIDE_INT
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index 604562f56..415d306fc 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -739,11 +739,11 @@
+ ;; 128-bit LSX modes can only exist in LSX registers or memory.  An exception
+ ;; is allowing LSX modes for GP registers for arguments and return values.
+ (define_insn "mov<mode>_lsx"
+-  [(set (match_operand:LSX 0 "nonimmediate_operand" "=f,f,R,*r,*f")
+-	(match_operand:LSX 1 "move_operand" "fYGYI,R,f,*f,*r"))]
++  [(set (match_operand:LSX 0 "nonimmediate_operand" "=f,f,R,*r,*f,*r")
++	(match_operand:LSX 1 "move_operand" "fYGYI,R,f,*f,*r,*r"))]
+   "ISA_HAS_LSX"
+   { return loongarch_output_move (operands[0], operands[1]); }
+-  [(set_attr "type" "simd_move,simd_load,simd_store,simd_copy,simd_insert")
++  [(set_attr "type" "simd_move,simd_load,simd_store,simd_copy,simd_insert,simd_move")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_split
+@@ -753,7 +753,7 @@
+    && loongarch_split_move_insn_p (operands[0], operands[1])"
+   [(const_int 0)]
+ {
+-  loongarch_split_move_insn (operands[0], operands[1], curr_insn);
++  loongarch_split_move (operands[0], operands[1]);
+   DONE;
+ })
+ 
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/test-mask_set_test.c b/src/gcc/testsuite/gcc.target/loongarch/test-mask_set_test.c
+new file mode 100644
+index 000000000..7feb48dbe
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/test-mask_set_test.c
+@@ -0,0 +1,13 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mlsx -mno-vecarg" } */
++/* { dg-final { scan-assembler-times "vpickve2gr\\.du" 4 } } */
++
++typedef long long v2i64 __attribute__ ((vector_size (16), aligned (16)));
++extern v2i64 a, b;
++void test (v2i64, v2i64, v2i64);
++
++void
++test1 (void)
++{
++  test (a, b, a);
++}
+-- 
+2.34.1
+

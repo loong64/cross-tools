@@ -1,0 +1,32 @@
+From ec3dcb0e203970ccf6c22d295f2d947e33d20f22 Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Thu, 29 Jun 2023 16:37:46 +0800
+Subject: [PATCH 05/13] gcc-8.3.0: Export headers to
+ lib/gcc/loongarch64-linux-gnu/8.3.0/plugin/include/config/loongarch.
+
+The compilation failure of the annobin application is caused by the incomplete header file exported.
+Export header files loongarch-def.h loongarch-tune.h and loongarch-driver.h.
+
+Change-Id: Id22e737c5669c38ea32bc76ac40022738c1f75e1
+---
+ src/gcc/config/loongarch/t-loongarch | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/gcc/config/loongarch/t-loongarch b/src/gcc/config/loongarch/t-loongarch
+index 9d32fbcf6..e34512114 100644
+--- a/src/gcc/config/loongarch/t-loongarch
++++ b/src/gcc/config/loongarch/t-loongarch
+@@ -20,6 +20,10 @@
+ LA_MULTIARCH_TRIPLET = $(patsubst LA_MULTIARCH_TRIPLET=%,%,$\
+ $(filter LA_MULTIARCH_TRIPLET=%,$(tm_defines)))
+ 
++OPTIONS_H_EXTRA += $(srcdir)/config/loongarch/loongarch-def.h \
++		   $(srcdir)/config/loongarch/loongarch-tune.h \
++		   $(srcdir)/config/loongarch/loongarch-driver.h
++
+ # String definition header
+ LA_STR_H = $(srcdir)/config/loongarch/loongarch-str.h
+ $(LA_STR_H): s-loongarch-str ; @true
+-- 
+2.31.1
+

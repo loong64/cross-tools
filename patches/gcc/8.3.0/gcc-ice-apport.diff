@@ -1,0 +1,22 @@
+# DP: Report an ICE to apport (if apport is available
+# DP: and the environment variable GCC_NOAPPORT is not set)
+
+--- a/src/gcc/gcc.c
++++ b/src/gcc/gcc.c
+@@ -6968,6 +6968,16 @@ do_report_bug (const char **new_argv, co
+ 	  fflush(stderr);
+ 	  free(cmd);
+ 	}
++      if (!env.get ("GCC_NOAPPORT")
++	  && !access ("/usr/share/apport/gcc_ice_hook", R_OK | X_OK))
++	{
++	  char *cmd = XNEWVEC (char, 50 + strlen (*out_file)
++			       + strlen (new_argv[0]));
++	  sprintf (cmd, "/usr/share/apport/gcc_ice_hook %s %s",
++		   new_argv[0], *out_file);
++	  system (cmd);
++	  free (cmd);
++	}
+       /* Make sure it is not deleted.  */
+       free (*out_file);
+       *out_file = NULL;

@@ -1,0 +1,83 @@
+From 8702cd576ab6b84c4f1a736acb4f21bfedab964c Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Wed, 28 Dec 2022 10:49:14 +0800
+Subject: [PATCH 17/28] LoongArch / MIPS: fix SI->SF conversion ICE under
+ -msingle-float.
+
+From 70596a0fb2a2ec072e1e97e37616e05041dfa4e5 Mon Sep 17 00:00:00 2001
+From: "Vladimir N. Makarov" <vmakarov@redhat.com>
+Date: Fri, 2 Dec 2022 08:18:04 -0500
+Subject: [PATCH] LRA: Check hard reg availability of pseudo and its subreg for
+ pseudo reload
+
+Do not reload subreg pseudo if there are hard regs for subreg mode
+but there are no hard regs for pseudo mode.
+
+        PR target/106462
+
+gcc/ChangeLog:
+
+	* lra-constraints.cc (curr_insn_transform): Check available hard
+	regs for pseudo and its subreg to decide what to reload.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/mips/pr106462.c: New test.
+---
+ gcc/lra-constraints.cc                   | 13 ++++++++++++-
+ gcc/testsuite/gcc.target/mips/pr106462.c | 12 ++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/mips/pr106462.c
+
+Change-Id: I007862934f6a844d6b58a609c9ad8a7dcc3e43ab
+---
+ src/gcc/lra-constraints.c                    | 13 ++++++++++++-
+ src/gcc/testsuite/gcc.target/mips/pr106462.c | 12 ++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/mips/pr106462.c
+
+diff --git a/src/gcc/lra-constraints.c b/src/gcc/lra-constraints.c
+index e3adf78e5..ca2312203 100644
+--- a/src/gcc/lra-constraints.c
++++ b/src/gcc/lra-constraints.c
+@@ -4278,7 +4278,18 @@ curr_insn_transform (bool check_only_p)
+ 		      || (partial_subreg_p (mode, GET_MODE (reg))
+ 			  && known_le (GET_MODE_SIZE (GET_MODE (reg)),
+ 				       UNITS_PER_WORD)
+-			  && WORD_REGISTER_OPERATIONS)))
++			  && WORD_REGISTER_OPERATIONS))
++		  /* Avoid the situation when there are no available hard regs
++		     for the pseudo mode but there are ones for the subreg
++		     mode: */
++		  && !(goal_alt[i] != NO_REGS
++		       && REGNO (reg) >= FIRST_PSEUDO_REGISTER
++		       && (prohibited_class_reg_set_mode_p
++			   (goal_alt[i], reg_class_contents[goal_alt[i]],
++			    GET_MODE (reg)))
++		       && !(prohibited_class_reg_set_mode_p
++			    (goal_alt[i], reg_class_contents[goal_alt[i]],
++			     mode))))
+ 		{
+ 		  /* An OP_INOUT is required when reloading a subreg of a
+ 		     mode wider than a word to ensure that data beyond the
+diff --git a/src/gcc/testsuite/gcc.target/mips/pr106462.c b/src/gcc/testsuite/gcc.target/mips/pr106462.c
+new file mode 100644
+index 000000000..c91054095
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/mips/pr106462.c
+@@ -0,0 +1,12 @@
++/* { dg-do compile } */
++/* { dg-options "-mabi=64 -msingle-float" } */
++
++extern void bar (float x, short y);
++
++void foo (int argc)
++{
++    short c = argc * 2;
++    float a = (float)(short)c, b = 9.5;
++
++    bar (b/a, c);
++}
+-- 
+2.31.1
+

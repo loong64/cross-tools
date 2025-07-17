@@ -1,0 +1,131 @@
+From 1e0abcb8460ccce532766854f9d2d73525032d73 Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Tue, 25 Mar 2025 09:39:09 +0800
+Subject: [PATCH 2/2] LoongArch:  Fix incorrect reorder of __lsx_vldx and
+ __lasx_xvldx [PR119084].
+
+Change-Id: If19062ac02d17754b283f1838781f573a12df78e
+---
+ src/gcc/config/loongarch/lasx.md              | 13 -----------
+ src/gcc/config/loongarch/lsx.md               | 13 -----------
+ src/gcc/config/loongarch/simd.md              | 11 +++++++++
+ .../testsuite/gcc.target/loongarch/pr119084.c | 23 +++++++++++++++++++
+ 4 files changed, 34 insertions(+), 26 deletions(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/pr119084.c
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index b141863eb..0b1b90aea 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -174,7 +174,6 @@
+   UNSPEC_LASX_XVSSRLRN 
+   UNSPEC_LASX_XVEXTL_QU_DU
+   UNSPEC_LASX_XVLDI
+-  UNSPEC_LASX_XVLDX
+   UNSPEC_LASX_XVSTX
+   UNSPEC_LASX_VECINIT_MERGE
+   UNSPEC_LASX_VEC_SET_INTERNAL
+@@ -4973,18 +4972,6 @@
+   [(set_attr "type" "simd_load")
+    (set_attr "mode" "V4DI")])
+ 
+-(define_insn "lasx_xvldx"
+-  [(set (match_operand:V32QI 0 "register_operand" "=f")
+-   	(unspec:V32QI [(match_operand:DI 1 "register_operand" "r")
+-                       (match_operand:DI 2 "reg_or_0_operand" "rJ")]
+-		    UNSPEC_LASX_XVLDX))]
+-  "ISA_HAS_LASX"
+-{
+-    return "xvldx\t%u0,%1,%z2";
+-}
+-  [(set_attr "type" "simd_load")
+-   (set_attr "mode" "V32QI")])
+-
+ (define_insn "lasx_xvstx"
+   [(set (mem:V32QI (plus:DI (match_operand:DI 1 "register_operand" "r") 
+ 		         (match_operand:DI 2 "reg_or_0_operand" "rJ")))
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index 415d306fc..8617c4aee 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -117,7 +117,6 @@
+   UNSPEC_LSX_VSSRLRN
+   UNSPEC_LSX_VLDI
+   UNSPEC_LSX_VSHUF_B
+-  UNSPEC_LSX_VLDX
+   UNSPEC_LSX_VSTX
+   UNSPEC_LSX_VEXTL_QU_DU
+   UNSPEC_LSX_VSETEQZ_V
+@@ -3320,18 +3319,6 @@
+   [(set_attr "type" "simd_shf")
+    (set_attr "mode" "V16QI")])
+ 
+-(define_insn "lsx_vldx"
+-  [(set (match_operand:V16QI 0 "register_operand" "=f")
+-   	(unspec:V16QI [(match_operand:DI 1 "register_operand" "r")
+-                       (match_operand:DI 2 "reg_or_0_operand" "rJ")]
+-		    UNSPEC_LSX_VLDX))]
+-  "ISA_HAS_LSX"
+-{
+-    return "vldx\t%w0,%1,%z2";
+-}
+-  [(set_attr "type" "simd_load")
+-   (set_attr "mode" "V16QI")])
+-
+ (define_insn "lsx_vstx"
+   [(set (mem:V16QI (plus:DI (match_operand:DI 1 "register_operand" "r") 
+ 		         (match_operand:DI 2 "reg_or_0_operand" "rJ")))
+diff --git a/src/gcc/config/loongarch/simd.md b/src/gcc/config/loongarch/simd.md
+index b815ea71a..39ff60cfd 100644
+--- a/src/gcc/config/loongarch/simd.md
++++ b/src/gcc/config/loongarch/simd.md
+@@ -189,6 +189,17 @@
+   [(set_attr "type" "simd_fcmp")
+    (set_attr "mode" "<MODE>")])
+ 
++;; REG + REG load
++
++(define_mode_iterator QIVEC [(V16QI "ISA_HAS_LSX") (V32QI "ISA_HAS_LASX")])
++(define_insn "<simd_isa>_<x>vldx"
++  [(set (match_operand:QIVEC 0 "register_operand" "=f")
++       (mem:QIVEC (plus:DI (match_operand:DI 1 "register_operand" "r")
++                           (match_operand:DI 2 "register_operand" "r"))))]
++  "TARGET_64BIT"
++  "<x>vldx\t%<wu>0,%1,%2"
++  [(set_attr "type" "simd_load")])
++
+ ; The LoongArch SX Instructions.
+  (include "lsx.md")
+ 
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/pr119084.c b/src/gcc/testsuite/gcc.target/loongarch/pr119084.c
+new file mode 100644
+index 000000000..6051413f0
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/pr119084.c
+@@ -0,0 +1,23 @@
++/* { dg-do run } */
++/* { dg-options "-O2 -mlsx" } */
++
++typedef signed char V16QI __attribute__ ((vector_size (16)));
++static char x[128];
++
++__attribute__ ((noipa)) int
++noopt (int x)
++{
++  return x;
++}
++
++int
++main (void)
++{
++  int t = noopt (32);
++
++  x[32] = 1;
++
++  V16QI y = __builtin_lsx_vldx (x, t);
++  if (y[0] != 1)
++    __builtin_trap ();
++}
+-- 
+2.34.1
+

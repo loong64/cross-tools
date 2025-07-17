@@ -1,0 +1,44 @@
+# DP: Fix PR fortran/89981, taken from the trunk
+
+gcc/fortran/
+
+2019-04-06  Thomas Koenig  <tkoenig@gcc.gnu.org>
+
+	PR fortran/89981
+	* resolve.c (resolve_global_procedure): If the global symbol is an
+	ENTRY, also look up its name among the entries.
+
+gcc/testsuite/
+
+2019-04-06  Thomas Koenig  <tkoenig@gcc.gnu.org>
+
+	PR fortran/89981
+	* gfortran.dg/entry_22.f90: New test.
+
+--- a/src/gcc/fortran/resolve.c
++++ b/src/gcc/fortran/resolve.c
+@@ -2546,7 +2546,7 @@
+ 	  if (gsym->binding_label && gsym->sym_name != def_sym->name)
+ 	    gfc_find_symbol (gsym->sym_name, gsym->ns, 0, &def_sym);
+ 
+-	  if (def_sym->attr.entry_master)
++	  if (def_sym->attr.entry_master || def_sym->attr.entry)
+ 	    {
+ 	      gfc_entry_list *entry;
+ 	      for (entry = gsym->ns->entries; entry; entry = entry->next)
+
+--- a/src/gcc/testsuite/gfortran.dg/entry_22.f90
++++ b/src/gcc/testsuite/gfortran.dg/entry_22.f90
+@@ -0,0 +1,12 @@
++! { dg-do compile }
++! { dg-additional-options "-pedantic" }
++! PR fortran/89981 - this used to give a wrong warning (error with
++! -pedantic)
++program main
++  call bar(i)
++  call baz(i) ! { dg-error "Type mismatch in argument" }
++end program main
++subroutine foo(r)
++  entry bar(i)
++  entry baz(r)
++end subroutine foo

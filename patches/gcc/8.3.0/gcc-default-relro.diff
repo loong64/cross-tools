@@ -1,0 +1,45 @@
+# DP: Turn on -Wl,-z,relro by default.
+
+---
+ gcc/doc/invoke.texi |    3 +++
+ gcc/gcc.c           |    1 +
+ 2 files changed, 4 insertions(+), 0 deletions(-)
+
+Index: b/src/gcc/doc/invoke.texi
+===================================================================
+--- a/src/gcc/doc/invoke.texi
++++ b/src/gcc/doc/invoke.texi
+@@ -11813,6 +11813,9 @@ For example, @option{-Wl,-Map,output.map
+ linker.  When using the GNU linker, you can also get the same effect with
+ @option{-Wl,-Map=output.map}.
+ 
++NOTE: In Ubuntu 8.10 and later versions, for LDFLAGS, the option
++@option{-Wl,-z,relro} is used.  To disable, use @option{-Wl,-z,norelro}.
++
+ @item -u @var{symbol}
+ @opindex u
+ Pretend the symbol @var{symbol} is undefined, to force linking of
+Index: b/src/gcc/gcc.c
+===================================================================
+--- a/src/gcc/gcc.c
++++ b/src/gcc/gcc.c
+@@ -1037,6 +1037,11 @@ proper position among the other output f
+ /* We pass any -flto flags on to the linker, which is expected
+    to understand them.  In practice, this means it had better be collect2.  */
+ /* %{e*} includes -export-dynamic; see comment in common.opt.  */
++#if defined(ACCEL_COMPILER)
++# define RELRO_SPEC ""
++#else
++# define RELRO_SPEC "-z relro "
++#endif
+ #ifndef LINK_COMMAND_SPEC
+ #define LINK_COMMAND_SPEC "\
+ %{!fsyntax-only:%{!c:%{!M:%{!MM:%{!E:%{!S:\
+@@ -1045,6 +1050,7 @@ proper position among the other output f
+    "%{flto|flto=*:%<fcompare-debug*} \
+     %{flto} %{fno-lto} %{flto=*} %l " LINK_PIE_SPEC \
+    "%{fuse-ld=*:-fuse-ld=%*} " LINK_COMPRESS_DEBUG_SPEC \
++   RELRO_SPEC \
+    "%X %{o*} %{e*} %{N} %{n} %{r}\
+     %{s} %{t} %{u*} %{z} %{Z} %{!nostdlib:%{!nostartfiles:%S}} \
+     %{static:} %{L*} %(mfwrap) %(link_libgcc) " \

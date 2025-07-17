@@ -1,0 +1,18 @@
+DP: Improve support for ZCX on arm.
+
+Index: b/src/gcc/ada/gcc-interface/Makefile.in
+===================================================================
+--- a/src/gcc/ada/gcc-interface/Makefile.in
++++ b/src/gcc/ada/gcc-interface/Makefile.in
+@@ -1595,7 +1595,10 @@ ifeq ($(strip $(filter-out arm% linux-gn
+   ifeq ($(strip $(filter-out arm%b,$(target_cpu))),)
+     EH_MECHANISM=
+   else
+-    EH_MECHANISM=-arm
++    # Special case; the GCC exception mechanism is supported under
++    # another name and with different files than for other
++    # target_cpus.
++    override EH_MECHANISM=-arm
+   endif
+ 
+   TOOLS_TARGET_PAIRS = indepsw.adb<indepsw-gnu.adb

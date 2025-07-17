@@ -1,0 +1,28 @@
+# DP: Modify gdc driver to have no libphobos by default.
+
+Index: b/src/gcc/d/d-lang.cc
+===================================================================
+--- a/src/gcc/d/d-lang.cc
++++ b/src/gcc/d/d-lang.cc
+@@ -309,7 +309,7 @@ static void
+ d_init_options_struct (gcc_options *opts)
+ {
+   /* GCC options.  */
+-  opts->x_flag_exceptions = 1;
++  opts->x_flag_exceptions = 0;
+ 
+   /* Avoid range issues for complex multiply and divide.  */
+   opts->x_flag_complex_method = 2;
+Index: b/src/gcc/d/d-spec.c
+===================================================================
+--- a/src/gcc/d/d-spec.c
++++ b/src/gcc/d/d-spec.c
+@@ -60,7 +60,7 @@ static int library = 0;
+ 
+ /* If true, use the standard D runtime library when linking with
+    standard libraries. */
+-static bool need_phobos = true;
++static bool need_phobos = false;
+ 
+ void
+ lang_specific_driver (cl_decoded_option **in_decoded_options,

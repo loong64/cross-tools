@@ -1,0 +1,1221 @@
+From 59f7465cc4f01a0b423e8687b4cdd79105414208 Mon Sep 17 00:00:00 2001
+From: Guo Jie <guojie@loongson.cn>
+Date: Wed, 11 Oct 2023 10:59:20 +0800
+Subject: [PATCH 01/15] LoongArch: Optimizations of vector construction.
+
+src/gcc/ChangeLog:
+
+	* config/loongarch/lasx.md (lasx_vecinit_merge_<LASX:mode>): New
+	pattern for vector construction.
+	(vec_set<mode>_internal): Ditto.
+	(lasx_xvinsgr2vr_<mode256_i_half>_internal): Ditto.
+	(lasx_xvilvl_<lasxfmt_f>_internal): Ditto.
+	* config/loongarch/loongarch.cc (loongarch_expand_vector_init):
+	Optimized the implementation of vector construction.
+	(loongarch_expand_vector_init_same): New function.
+	* config/loongarch/lsx.md (lsx_vilvl_<lsxfmt_f>_internal): New
+	pattern for vector construction.
+	(lsx_vreplvei_mirror_<lsxfmt_f>): New pattern for vector
+	construction.
+	(vec_concatv2df): Ditto.
+	(vec_concatv4sf): Ditto.
+
+src/gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/vector/lasx/lasx-vec-construct-opt.c: New test.
+	* gcc.target/loongarch/vector/lsx/lsx-vec-construct-opt.c: New test.
+
+Change-Id: I1e7a081e5a6e9db03135e5ec56fb5d5f21f21c60
+---
+ src/gcc/config/loongarch/lasx.md              |  69 ++
+ src/gcc/config/loongarch/loongarch.c          | 637 ++++++++++--------
+ src/gcc/config/loongarch/lsx.md               | 134 ++++
+ .../loongarch/lasx-vec-construct-opt.c        | 102 +++
+ .../loongarch/lsx-vec-construct-opt.c         |  85 +++
+ 5 files changed, 744 insertions(+), 283 deletions(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/lasx-vec-construct-opt.c
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/lsx-vec-construct-opt.c
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index edd6e3204..ad2844f2d 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -189,6 +189,9 @@
+   UNSPEC_LASX_XVLDI
+   UNSPEC_LASX_XVLDX
+   UNSPEC_LASX_XVSTX
++  UNSPEC_LASX_VECINIT_MERGE
++  UNSPEC_LASX_VEC_SET_INTERNAL
++  UNSPEC_LASX_XVILVL_INTERNAL
+ ])
+ 
+ ;; All vector modes with 256 bits.
+@@ -258,6 +261,15 @@
+    [(V8SF "V4SF")
+    (V4DF "V2DF")])
+ 
++;; The attribute gives half int/float modes for vector modes.
++(define_mode_attr VHMODE256_ALL
++  [(V32QI "V16QI")
++   (V16HI "V8HI")
++   (V8SI "V4SI")
++   (V4DI "V2DI")
++   (V8SF "V4SF")
++   (V4DF "V2DF")])
++
+ ;; The attribute gives double modes for vector modes in LASX.
+ (define_mode_attr VDMODE256
+   [(V8SI "V4DI")
+@@ -308,6 +320,11 @@
+    (V4DI "v4df")
+    (V8SI "v8sf")])
+ 
++;; This attribute gives V32QI mode and V16HI mode with half size.
++(define_mode_attr mode256_i_half
++  [(V32QI "v16qi")
++   (V16HI "v8hi")])
++
+  ;; This attribute gives suffix for LASX instructions.HOW?
+ (define_mode_attr lasxfmt
+   [(V4DF "d")
+@@ -753,6 +770,20 @@
+   [(set_attr "type" "simd_splat")
+    (set_attr "mode" "<MODE>")])
+ 
++;; Only for loongarch_expand_vector_init in loongarch.cc.
++;; Support a LSX-mode input op2.
++(define_insn "lasx_vecinit_merge_<LASX:mode>"
++  [(set (match_operand:LASX 0 "register_operand" "=f")
++	(unspec:LASX
++	  [(match_operand:LASX 1 "register_operand" "0")
++	   (match_operand:<VHMODE256_ALL> 2 "register_operand" "f")
++	   (match_operand     3 "const_uimm8_operand")]
++	   UNSPEC_LASX_VECINIT_MERGE))]
++  "ISA_HAS_LASX"
++  "xvpermi.q\t%u0,%u2,%3"
++  [(set_attr "type" "simd_splat")
++   (set_attr "mode" "<MODE>")])
++
+ (define_insn "lasx_xvpickve2gr_d<u>"
+   [(set (match_operand:DI 0 "register_operand" "=r")
+ 	(any_extend:DI
+@@ -776,6 +807,33 @@
+   DONE;
+ })
+ 
++;; Only for loongarch_expand_vector_init in loongarch.cc.
++;; Simulate missing instructions xvinsgr2vr.b and xvinsgr2vr.h.
++(define_expand "vec_set<mode>_internal"
++  [(match_operand:ILASX_HB 0 "register_operand")
++   (match_operand:<UNITMODE> 1 "reg_or_0_operand")
++   (match_operand 2 "const_<indeximm256>_operand")]
++  "ISA_HAS_LASX"
++{
++  rtx index = GEN_INT (1 << INTVAL (operands[2]));
++  emit_insn (gen_lasx_xvinsgr2vr_<mode256_i_half>_internal
++	     (operands[0], operands[1], operands[0], index));
++  DONE;
++})
++
++(define_insn "lasx_xvinsgr2vr_<mode256_i_half>_internal"
++  [(set (match_operand:ILASX_HB 0 "register_operand" "=f")
++	(unspec:ILASX_HB [(match_operand:<UNITMODE> 1 "reg_or_0_operand" "rJ")
++			  (match_operand:ILASX_HB 2 "register_operand" "0")
++			  (match_operand 3 "const_<bitmask256>_operand" "")]
++			 UNSPEC_LASX_VEC_SET_INTERNAL))]
++  "ISA_HAS_LASX"
++{
++  return "vinsgr2vr.<lasxfmt>\t%w0,%z1,%y3";
++}
++  [(set_attr "type" "simd_insert")
++   (set_attr "mode" "<MODE>")])
++
+ (define_expand "vec_set<mode>"
+   [(match_operand:FLASX 0 "register_operand")
+    (match_operand:<UNITMODE> 1 "reg_or_0_operand")
+@@ -1587,6 +1645,17 @@
+   [(set_attr "type" "simd_flog2")
+    (set_attr "mode" "<MODE>")])
+ 
++;; Only for loongarch_expand_vector_init in loongarch.cc.
++;; Merge two scalar floating-point op1 and op2 into a LASX op0.
++(define_insn "lasx_xvilvl_<lasxfmt_f>_internal"
++  [(set (match_operand:FLASX 0 "register_operand" "=f")
++	(unspec:FLASX [(match_operand:<UNITMODE> 1 "register_operand" "f")
++		       (match_operand:<UNITMODE> 2 "register_operand" "f")]
++		      UNSPEC_LASX_XVILVL_INTERNAL))]
++  "ISA_HAS_LASX"
++  "xvilvl.<lasxfmt>\t%u0,%u2,%u1"
++  [(set_attr "type" "simd_permute")
++   (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "smax<mode>3"
+   [(set (match_operand:FLASX 0 "register_operand" "=f")
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index 9913df055..3041e819c 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -9718,328 +9718,399 @@ loongarch_expand_vector_group_init (rtx target, rtx vals)
+             ops[1])));
+ }
+ 
++/* Expand initialization of a vector which has all same elements.  */
++
+ void
+-loongarch_expand_vector_init (rtx target, rtx vals)
++loongarch_expand_vector_init_same (rtx target, rtx vals, unsigned nvar)
+ {
+   machine_mode vmode = GET_MODE (target);
+   machine_mode imode = GET_MODE_INNER (vmode);
+-  unsigned i, nelt = GET_MODE_NUNITS (vmode);
+-  unsigned nvar = 0 /*, one_var = -1u*/ ;
+-  bool all_same = true;
+-  rtx x;
++  rtx same = XVECEXP (vals, 0, 0);
++  rtx temp, temp2;
+ 
+-  for (i = 0; i < nelt; ++i)
++  if (CONST_INT_P (same) && nvar == 0
++      && loongarch_signed_immediate_p (INTVAL (same), 10, 0))
+     {
+-      x = XVECEXP (vals, 0, i);
+-      if (!loongarch_constant_elt_p (x))
+-	nvar++ /*, one_var = i */ ;
+-      if (i > 0 && !rtx_equal_p (x, XVECEXP (vals, 0, 0)))
+-	all_same = false;
++      switch (vmode)
++	{
++	case E_V32QImode:
++	case E_V16HImode:
++	case E_V8SImode:
++	case E_V4DImode:
++	case E_V16QImode:
++	case E_V8HImode:
++	case E_V4SImode:
++	case E_V2DImode:
++	  temp = gen_rtx_CONST_VECTOR (vmode, XVEC (vals, 0));
++	  emit_move_insn (target, temp);
++	  return;
++	default:
++	  gcc_unreachable ();
++	}
+     }
+-
+-  if (ISA_HAS_LASX && GET_MODE_SIZE (vmode) == 32)
++  temp = gen_reg_rtx (imode);
++  if (imode == GET_MODE (same))
++    temp2 = same;
++  else if (GET_MODE_SIZE (imode) >= UNITS_PER_WORD)
+     {
+-      if (all_same)
++      if (GET_CODE (same) == MEM)
+ 	{
+-	  rtx same = XVECEXP (vals, 0, 0);
+-	  rtx temp, temp2;
+-
+-	  if (CONST_INT_P (same) && nvar == 0
+-	      && loongarch_signed_immediate_p (INTVAL (same), 10, 0))
+-	    {
+-	      switch (vmode)
+-		{
+-		case E_V32QImode:
+-		case E_V16HImode:
+-		case E_V8SImode:
+-		case E_V4DImode:
+-		  temp = gen_rtx_CONST_VECTOR (vmode, XVEC (vals, 0));
+-		  emit_move_insn (target, temp);
+-		  return;
+-
+-		default:
+-		  gcc_unreachable ();
+-		}
+-	    }
+-
+-	      temp = gen_reg_rtx (imode);
+-	      if (imode == GET_MODE (same))
+-		temp2 = same;
+-	      else if (GET_MODE_SIZE (imode) >= UNITS_PER_WORD)
+-		{
+-		  if (GET_CODE (same) == MEM)
+-		    {
+-		      rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
+-		      loongarch_emit_move (reg_tmp, same);
+-		      temp2 = simplify_gen_subreg (imode, reg_tmp, GET_MODE (reg_tmp), 0);
+-		    }
+-		  else
+-		    temp2 = simplify_gen_subreg (imode, same, GET_MODE (same), 0);
+-		}
+-	      else
+-		{
+-		  if (GET_CODE (same) == MEM)
+-		    {
+-		      rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
+-		      loongarch_emit_move (reg_tmp, same);
+-		      temp2 = lowpart_subreg (imode, reg_tmp, GET_MODE (reg_tmp));
+-		    }
+-		  else
+-		    temp2 = lowpart_subreg (imode, same, GET_MODE (same));
+-		}
+-	      emit_move_insn (temp, temp2);
+-
+-	      switch (vmode)
+-		{
+-		case E_V32QImode:
+-		case E_V16HImode:
+-		case E_V8SImode:
+-		case E_V4DImode:
+-		  loongarch_emit_move (target, gen_rtx_VEC_DUPLICATE (vmode, temp));
+-		  break;
+-
+-		case E_V8SFmode:
+-		  emit_insn (gen_lasx_xvreplve0_w_f_scalar (target, temp));
+-		  break;
+-
+-		case E_V4DFmode:
+-		  emit_insn (gen_lasx_xvreplve0_d_f_scalar (target, temp));
+-		  break;
+-
+-		default:
+-		  gcc_unreachable ();
+-		}
++	  rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
++	  loongarch_emit_move (reg_tmp, same);
++	  temp2 = simplify_gen_subreg (imode, reg_tmp, GET_MODE (reg_tmp), 0);
+ 	}
+       else
++	temp2 = simplify_gen_subreg (imode, same, GET_MODE (same), 0);
++    }
++  else
++    {
++      if (GET_CODE (same) == MEM)
+ 	{
+-	  rtvec vec = shallow_copy_rtvec (XVEC (vals, 0));
++	  rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
++	  loongarch_emit_move (reg_tmp, same);
++	  temp2 = lowpart_subreg (imode, reg_tmp, GET_MODE (reg_tmp));
++	}
++      else
++	temp2 = lowpart_subreg (imode, same, GET_MODE (same));
++    }
++  emit_move_insn (temp, temp2);
+ 
+-	  for (i = 0; i < nelt; ++i)
+-	    RTVEC_ELT (vec, i) = CONST0_RTX (imode);
++  switch (vmode)
++    {
++    case E_V32QImode:
++    case E_V16HImode:
++    case E_V8SImode:
++    case E_V4DImode:
++    case E_V16QImode:
++    case E_V8HImode:
++    case E_V4SImode:
++    case E_V2DImode:
++      loongarch_emit_move (target, gen_rtx_VEC_DUPLICATE (vmode, temp));
++      break;
+ 
+-	  emit_move_insn (target, gen_rtx_CONST_VECTOR (vmode, vec));
++    case E_V8SFmode:
++      emit_insn (gen_lasx_xvreplve0_w_f_scalar (target, temp));
++      break;
+ 
+-	  machine_mode half_mode = VOIDmode;
+-	  rtx target_hi, target_lo;
++    case E_V4DFmode:
++      emit_insn (gen_lasx_xvreplve0_d_f_scalar (target, temp));
++      break;
+ 
+-	  switch (vmode)
+-	    {
+-	    case E_V32QImode:
+-	      half_mode=E_V16QImode;
+-	      target_hi = gen_reg_rtx (half_mode);
+-	      target_lo = gen_reg_rtx (half_mode);
+-	      for (i = 0; i < nelt/2; ++i)
+-		{
+-		  rtx temp_hi = gen_reg_rtx (imode);
+-		  rtx temp_lo = gen_reg_rtx (imode);
+-		  emit_move_insn (temp_hi, XVECEXP (vals, 0, i+nelt/2));
+-		  emit_move_insn (temp_lo, XVECEXP (vals, 0, i));
+-		  emit_insn (gen_vec_setv16qi (target_hi, temp_hi, GEN_INT (i)));
+-		  emit_insn (gen_vec_setv16qi (target_lo, temp_lo, GEN_INT (i)));
+-		 }
+-	      emit_insn (gen_rtx_SET (target, gen_rtx_VEC_CONCAT (vmode, target_hi, target_lo)));
+-	      break;
++    case E_V4SFmode:
++      emit_insn (gen_lsx_vreplvei_w_f_scalar (target, temp));
++      break;
+ 
+-	    case E_V16HImode:
+-	      half_mode=E_V8HImode;
+-	      target_hi = gen_reg_rtx (half_mode);
+-	      target_lo = gen_reg_rtx (half_mode);
+-	      for (i = 0; i < nelt/2; ++i)
+-		{
+-		  rtx temp_hi = gen_reg_rtx (imode);
+-		  rtx temp_lo = gen_reg_rtx (imode);
+-		  emit_move_insn (temp_hi, XVECEXP (vals, 0, i+nelt/2));
+-		  emit_move_insn (temp_lo, XVECEXP (vals, 0, i));
+-		  emit_insn (gen_vec_setv8hi (target_hi, temp_hi, GEN_INT (i)));
+-		  emit_insn (gen_vec_setv8hi (target_lo, temp_lo, GEN_INT (i)));
+-		 }
+-	      emit_insn (gen_rtx_SET (target, gen_rtx_VEC_CONCAT (vmode, target_hi, target_lo)));
+-	      break;
++    case E_V2DFmode:
++      emit_insn (gen_lsx_vreplvei_d_f_scalar (target, temp));
++      break;
+ 
+-	    case E_V8SImode:
+-	      half_mode=V4SImode;
+-	      target_hi = gen_reg_rtx (half_mode);
+-	      target_lo = gen_reg_rtx (half_mode);
+-	      for (i = 0; i < nelt/2; ++i)
+-		{
+-		  rtx temp_hi = gen_reg_rtx (imode);
+-		  rtx temp_lo = gen_reg_rtx (imode);
+-		  emit_move_insn (temp_hi, XVECEXP (vals, 0, i+nelt/2));
+-		  emit_move_insn (temp_lo, XVECEXP (vals, 0, i));
+-		  emit_insn (gen_vec_setv4si (target_hi, temp_hi, GEN_INT (i)));
+-		  emit_insn (gen_vec_setv4si (target_lo, temp_lo, GEN_INT (i)));
+-		 }
+-	      emit_insn (gen_rtx_SET (target, gen_rtx_VEC_CONCAT (vmode, target_hi, target_lo)));
+-	      break;
++    default:
++      gcc_unreachable ();
++    }
++}
+ 
+-	    case E_V4DImode:
+-	      half_mode=E_V2DImode;
+-	      target_hi = gen_reg_rtx (half_mode);
+-	      target_lo = gen_reg_rtx (half_mode);
+-	      for (i = 0; i < nelt/2; ++i)
+-		{
+-		  rtx temp_hi = gen_reg_rtx (imode);
+-		  rtx temp_lo = gen_reg_rtx (imode);
+-		  emit_move_insn (temp_hi, XVECEXP (vals, 0, i+nelt/2));
+-		  emit_move_insn (temp_lo, XVECEXP (vals, 0, i));
+-		  emit_insn (gen_vec_setv2di (target_hi, temp_hi, GEN_INT (i)));
+-		  emit_insn (gen_vec_setv2di (target_lo, temp_lo, GEN_INT (i)));
+-		 }
+-	      /* PUT_MODE(target_hi, GET_MODE (target)); */
+-	      /* PUT_MODE(target_lo, GET_MODE (target)); */
+-	      /* emit_insn ( gen_lasx_shufi_q_v4di (target_hi, target_lo, GEN_INT(1))); */
+-	      /* emit_move_insn (target, target_hi); */
+-	      emit_insn (gen_rtx_SET (target, gen_rtx_VEC_CONCAT (vmode, target_hi, target_lo)));
+-	      break;
++/* Expand a vector initialization.  */
+ 
+-	    case E_V8SFmode:
+-	      half_mode=E_V4SFmode;
+-	      target_hi = gen_reg_rtx (half_mode);
+-	      target_lo = gen_reg_rtx (half_mode);
+-	      for (i = 0; i < nelt/2; ++i)
+-		{
+-		  rtx temp_hi = gen_reg_rtx (imode);
+-		  rtx temp_lo = gen_reg_rtx (imode);
+-		  emit_move_insn (temp_hi, XVECEXP (vals, 0, i+nelt/2));
+-		  emit_move_insn (temp_lo, XVECEXP (vals, 0, i));
+-		  emit_insn (gen_vec_setv4sf (target_hi, temp_hi, GEN_INT (i)));
+-		  emit_insn (gen_vec_setv4sf (target_lo, temp_lo, GEN_INT (i)));
+-		 }
+-	      emit_insn (gen_rtx_SET (target, gen_rtx_VEC_CONCAT (vmode, target_hi, target_lo)));
+-	      break;
++void
++loongarch_expand_vector_init (rtx target, rtx vals)
++{
++  machine_mode vmode = GET_MODE (target);
++  machine_mode imode = GET_MODE_INNER (vmode);
++  unsigned i, nelt = GET_MODE_NUNITS (vmode);
++  /* VALS is divided into high and low half-part.  */
++  /* Number of non constant elements in corresponding parts of VALS.  */
++  unsigned nvar = 0, hi_nvar = 0, lo_nvar = 0;
++  /* all_same : true if all elements of VALS are the same.
++     hi_same : true if all elements of the high half-part are the same.
++     lo_same : true if all elements of the low half-part are the same.
++     half_same : true if the high half-part is the same as the low one.  */
++  bool all_same = false, hi_same = true, lo_same = true, half_same = true;
++  rtx val[32], val_hi[32], val_lo[16];
++  rtx x, op0, op1;
++  /* Copy one element of vals to per element of target vector.  */
++  typedef rtx (*loongarch_vec_repl1_fn) (rtx, rtx);
++  /* Copy two elements of vals to target vector.  */
++  typedef rtx (*loongarch_vec_repl2_fn) (rtx, rtx, rtx);
++  /* Insert scalar operands into the specified position of the vector.  */
++  typedef rtx (*loongarch_vec_set_fn) (rtx, rtx, rtx);
++  /* Copy 64bit lowpart to highpart.  */
++  typedef rtx (*loongarch_vec_mirror_fn) (rtx, rtx, rtx);
++  /* Merge lowpart and highpart into target.  */
++  typedef rtx (*loongarch_vec_merge_fn) (rtx, rtx, rtx, rtx);
++
++  loongarch_vec_repl1_fn loongarch_vec_repl1_128 = NULL,
++			 loongarch_vec_repl1_256 = NULL;
++  loongarch_vec_repl2_fn loongarch_vec_repl2_128 = NULL,
++			 loongarch_vec_repl2_256 = NULL;
++  loongarch_vec_set_fn loongarch_vec_set128 = NULL, loongarch_vec_set256 = NULL;
++  loongarch_vec_mirror_fn loongarch_vec_mirror = NULL;
++  loongarch_vec_merge_fn loongarch_lasx_vecinit_merge = NULL;
++  machine_mode half_mode = VOIDmode;
++
++  /* Check whether elements of each part are the same.  */
++  for (i = 0; i < nelt / 2; ++i)
++    {
++      val_hi[i] = val_hi[i + nelt / 2] = val[i + nelt / 2]
++	= XVECEXP (vals, 0, i + nelt / 2);
++      val_lo[i] = val[i] = XVECEXP (vals, 0, i);
++      if (!loongarch_constant_elt_p (val_hi[i]))
++	hi_nvar++;
++      if (!loongarch_constant_elt_p (val_lo[i]))
++	lo_nvar++;
++      if (i > 0 && !rtx_equal_p (val_hi[i], val_hi[0]))
++	hi_same = false;
++      if (i > 0 && !rtx_equal_p (val_lo[i], val_lo[0]))
++	lo_same = false;
++      if (!rtx_equal_p (val_hi[i], val_lo[i]))
++	half_same = false;
++    }
++
++  /* If all elements are the same, set all_same true.  */
++  if (hi_same && lo_same && half_same)
++    all_same = true;
++
++  nvar = hi_nvar + lo_nvar;
+ 
+-	    case E_V4DFmode:
+-	      half_mode=E_V2DFmode;
+-	      target_hi = gen_reg_rtx (half_mode);
+-	      target_lo = gen_reg_rtx (half_mode);
+-	      for (i = 0; i < nelt/2; ++i)
+-		{
+-		  rtx temp_hi = gen_reg_rtx (imode);
+-		  rtx temp_lo = gen_reg_rtx (imode);
+-		  emit_move_insn (temp_hi, XVECEXP (vals, 0, i+nelt/2));
+-		  emit_move_insn (temp_lo, XVECEXP (vals, 0, i));
+-		  emit_insn (gen_vec_setv2df (target_hi, temp_hi, GEN_INT (i)));
+-		  emit_insn (gen_vec_setv2df (target_lo, temp_lo, GEN_INT (i)));
+-		 }
+-	      emit_insn (gen_rtx_SET (target, gen_rtx_VEC_CONCAT (vmode, target_hi, target_lo)));
+-	      break;
++  switch (vmode)
++    {
++    case E_V32QImode:
++      half_mode = E_V16QImode;
++      loongarch_vec_set256 = gen_vec_setv32qi_internal;
++      loongarch_vec_repl1_256 = gen_lasx_xvreplgr2vr_b;
++      loongarch_lasx_vecinit_merge
++	= half_same ? gen_lasx_xvpermi_q_v32qi : gen_lasx_vecinit_merge_v32qi;
++      /* FALLTHRU.  */
++    case E_V16QImode:
++      loongarch_vec_set128 = gen_vec_setv16qi;
++      loongarch_vec_repl1_128 = gen_lsx_vreplgr2vr_b;
++      loongarch_vec_mirror = gen_lsx_vreplvei_mirror_b;
++      break;
+ 
+-	    default:
+-	      gcc_unreachable();
+-	    }
++    case E_V16HImode:
++      half_mode = E_V8HImode;
++      loongarch_vec_set256 = gen_vec_setv16hi_internal;
++      loongarch_vec_repl1_256 = gen_lasx_xvreplgr2vr_h;
++      loongarch_lasx_vecinit_merge
++	= half_same ? gen_lasx_xvpermi_q_v16hi : gen_lasx_vecinit_merge_v16hi;
++      /* FALLTHRU.  */
++    case E_V8HImode:
++      loongarch_vec_set128 = gen_vec_setv8hi;
++      loongarch_vec_repl1_128 = gen_lsx_vreplgr2vr_h;
++      loongarch_vec_mirror = gen_lsx_vreplvei_mirror_h;
++      break;
+ 
+-	  }
+-      return;
++    case E_V8SImode:
++      half_mode = V4SImode;
++      loongarch_vec_set256 = gen_vec_setv8si;
++      loongarch_vec_repl1_256 = gen_lasx_xvreplgr2vr_w;
++      loongarch_lasx_vecinit_merge
++	= half_same ? gen_lasx_xvpermi_q_v8si : gen_lasx_vecinit_merge_v8si;
++      /* FALLTHRU.  */
++    case E_V4SImode:
++      loongarch_vec_set128 = gen_vec_setv4si;
++      loongarch_vec_repl1_128 = gen_lsx_vreplgr2vr_w;
++      loongarch_vec_mirror = gen_lsx_vreplvei_mirror_w;
++      break;
++
++    case E_V4DImode:
++      half_mode = E_V2DImode;
++      loongarch_vec_set256 = gen_vec_setv4di;
++      loongarch_vec_repl1_256 = gen_lasx_xvreplgr2vr_d;
++      loongarch_lasx_vecinit_merge
++	= half_same ? gen_lasx_xvpermi_q_v4di : gen_lasx_vecinit_merge_v4di;
++      /* FALLTHRU.  */
++    case E_V2DImode:
++      loongarch_vec_set128 = gen_vec_setv2di;
++      loongarch_vec_repl1_128 = gen_lsx_vreplgr2vr_d;
++      loongarch_vec_mirror = gen_lsx_vreplvei_mirror_d;
++      break;
++
++    case E_V8SFmode:
++      half_mode = E_V4SFmode;
++      loongarch_vec_set256 = gen_vec_setv8sf;
++      loongarch_vec_repl1_128 = gen_lsx_vreplvei_w_f_scalar;
++      loongarch_vec_repl2_256 = gen_lasx_xvilvl_w_f_internal;
++      loongarch_lasx_vecinit_merge
++	= half_same ? gen_lasx_xvpermi_q_v8sf : gen_lasx_vecinit_merge_v8sf;
++      /* FALLTHRU.  */
++    case E_V4SFmode:
++      loongarch_vec_set128 = gen_vec_setv4sf;
++      loongarch_vec_repl2_128 = gen_lsx_vilvl_w_f_internal;
++      loongarch_vec_mirror = gen_lsx_vreplvei_mirror_w_f;
++      break;
++
++    case E_V4DFmode:
++      half_mode = E_V2DFmode;
++      loongarch_vec_set256 = gen_vec_setv4df;
++      loongarch_vec_repl1_128 = gen_lsx_vreplvei_d_f_scalar;
++      loongarch_vec_repl2_256 = gen_lasx_xvilvl_d_f_internal;
++      loongarch_lasx_vecinit_merge
++	= half_same ? gen_lasx_xvpermi_q_v4df : gen_lasx_vecinit_merge_v4df;
++      /* FALLTHRU.  */
++    case E_V2DFmode:
++      loongarch_vec_set128 = gen_vec_setv2df;
++      loongarch_vec_repl2_128 = gen_lsx_vilvl_d_f_internal;
++      loongarch_vec_mirror = gen_lsx_vreplvei_mirror_d_f;
++      break;
++
++    default:
++      gcc_unreachable ();
+     }
+ 
+-  if (ISA_HAS_LSX)
++  if (ISA_HAS_LASX && GET_MODE_SIZE (vmode) == 32)
+     {
++      /* If all elements are the same, just do a broadcost.  */
+       if (all_same)
++	loongarch_expand_vector_init_same (target, vals, nvar);
++      else
+ 	{
+-	  rtx same = XVECEXP (vals, 0, 0);
+-	  rtx temp, temp2;
++	  gcc_assert (nelt >= 4);
++
++	  rtx target_hi, target_lo;
++	  /* Write elements of high half-part in target directly.  */
++	  target_hi = target;
++	  target_lo = gen_reg_rtx (half_mode);
++
++	  /* If all elements of high half-part are the same,
++	     just do a broadcost.  Also applicable to low half-part.  */
++	  if (hi_same)
++	    {
++	      rtx vtmp = gen_rtx_PARALLEL (vmode, gen_rtvec_v (nelt, val_hi));
++	      loongarch_expand_vector_init_same (target_hi, vtmp, hi_nvar);
++	    }
++	  if (lo_same)
++	    {
++	      rtx vtmp
++		= gen_rtx_PARALLEL (half_mode, gen_rtvec_v (nelt / 2, val_lo));
++	      loongarch_expand_vector_init_same (target_lo, vtmp, lo_nvar);
++	    }
+ 
+-	  if (CONST_INT_P (same) && nvar == 0
+-	      && loongarch_signed_immediate_p (INTVAL (same), 10, 0))
++	  for (i = 0; i < nelt / 2; ++i)
+ 	    {
+-	      switch (vmode)
++	      if (!hi_same)
+ 		{
+-		case E_V16QImode:
+-		case E_V8HImode:
+-		case E_V4SImode:
+-		case E_V2DImode:
+-		  temp = gen_rtx_CONST_VECTOR (vmode, XVEC (vals, 0));
+-		  emit_move_insn (target, temp);
+-		  return;
+-
+-		default:
+-		  gcc_unreachable ();
++		  if (vmode == E_V8SFmode || vmode == E_V4DFmode)
++		    {
++		      /* Using xvilvl to load lowest 2 elements simultaneously
++			 to reduce the number of instructions.  */
++		      if (i == 1)
++			{
++			  op0 = gen_reg_rtx (imode);
++			  emit_move_insn (op0, val_hi[0]);
++			  op1 = gen_reg_rtx (imode);
++			  emit_move_insn (op1, val_hi[1]);
++			  emit_insn (
++			    loongarch_vec_repl2_256 (target_hi, op0, op1));
++			}
++		      else if (i > 1)
++			{
++			  op0 = gen_reg_rtx (imode);
++			  emit_move_insn (op0, val_hi[i]);
++			  emit_insn (
++			    loongarch_vec_set256 (target_hi, op0, GEN_INT (i)));
++			}
++		    }
++		  else
++		    {
++		      /* Assign the lowest element of val_hi to all elements
++			 of target_hi.  */
++		      if (i == 0)
++			{
++			  op0 = gen_reg_rtx (imode);
++			  emit_move_insn (op0, val_hi[0]);
++			  emit_insn (loongarch_vec_repl1_256 (target_hi, op0));
++			}
++		      else if (!rtx_equal_p (val_hi[i], val_hi[0]))
++			{
++			  op0 = gen_reg_rtx (imode);
++			  emit_move_insn (op0, val_hi[i]);
++			  emit_insn (
++			    loongarch_vec_set256 (target_hi, op0, GEN_INT (i)));
++			}
++		    }
++		}
++	      if (!lo_same && !half_same)
++		{
++		  /* Assign the lowest element of val_lo to all elements
++		     of target_lo.  */
++		  if (i == 0)
++		    {
++		      op0 = gen_reg_rtx (imode);
++		      emit_move_insn (op0, val_lo[0]);
++		      emit_insn (loongarch_vec_repl1_128 (target_lo, op0));
++		    }
++		  else if (!rtx_equal_p (val_lo[i], val_lo[0]))
++		    {
++		      op0 = gen_reg_rtx (imode);
++		      emit_move_insn (op0, val_lo[i]);
++		      emit_insn (
++			loongarch_vec_set128 (target_lo, op0, GEN_INT (i)));
++		    }
+ 		}
+ 	    }
+-	  temp = gen_reg_rtx (imode);
+-	  if (imode == GET_MODE (same))
+-	    temp2 = same;
+-          else if (GET_MODE_SIZE (imode) >= UNITS_PER_WORD)
+-            {
+-              if (GET_CODE (same) == MEM)
+-                {
+-                  rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
+-                  loongarch_emit_move (reg_tmp, same);
+-                  temp2 = simplify_gen_subreg (imode, reg_tmp, GET_MODE (reg_tmp), 0);
+-                }
+-              else
+-                temp2 = simplify_gen_subreg (imode, same, GET_MODE (same), 0);
+-            }
+-          else
+-            {
+-              if (GET_CODE (same) == MEM)
+-                {
+-                  rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
+-                  loongarch_emit_move (reg_tmp, same);
+-                  temp2 = lowpart_subreg (imode, reg_tmp, GET_MODE (reg_tmp));
+-                }
+-              else
+-                temp2 = lowpart_subreg (imode, same, GET_MODE (same));
+-            }
+-	  emit_move_insn (temp, temp2);
+-
+-	  switch (vmode)
++	  if (half_same)
+ 	    {
+-	    case E_V16QImode:
+-	    case E_V8HImode:
+-	    case E_V4SImode:
+-	    case E_V2DImode:
+-	      loongarch_emit_move (target, gen_rtx_VEC_DUPLICATE (vmode, temp));
+-	      break;
+-
+-	    case E_V4SFmode:
+-	      emit_insn (gen_lsx_vreplvei_w_f_scalar (target, temp));
+-	      break;
+-
+-	    case E_V2DFmode:
+-	      emit_insn (gen_lsx_vreplvei_d_f_scalar (target, temp));
+-	      break;
+-
+-	    default:
+-	      gcc_unreachable ();
++	      emit_insn (loongarch_lasx_vecinit_merge (target, target_hi,
++						       target_hi, const0_rtx));
++	      return;
+ 	    }
++	  emit_insn (loongarch_lasx_vecinit_merge (target, target_hi, target_lo,
++						   GEN_INT (0x20)));
+ 	}
++      return;
++    }
++
++  if (ISA_HAS_LSX)
++    {
++      if (all_same)
++	loongarch_expand_vector_init_same (target, vals, nvar);
+       else
+ 	{
+-	  emit_move_insn (target, CONST0_RTX (vmode));
+-
+ 	  for (i = 0; i < nelt; ++i)
+ 	    {
+-	      rtx temp = gen_reg_rtx (imode);
+-	      emit_move_insn (temp, XVECEXP (vals, 0, i));
+-	      switch (vmode)
++	      if (vmode == E_V4SFmode || vmode == E_V2DFmode)
+ 		{
+-		case E_V16QImode:
+-		  emit_insn (gen_vec_setv16qi (target, temp, GEN_INT (i)));
+-		  break;
+-
+-		case E_V8HImode:
+-		  emit_insn (gen_vec_setv8hi (target, temp, GEN_INT (i)));
+-		  break;
+-
+-		case E_V4SImode:
+-		  emit_insn (gen_vec_setv4si (target, temp, GEN_INT (i)));
+-		  break;
+-
+-		case E_V2DImode:
+-		  emit_insn (gen_vec_setv2di (target, temp, GEN_INT (i)));
+-		  break;
+-
+-		case E_V4SFmode:
+-		  emit_insn (gen_vec_setv4sf (target, temp, GEN_INT (i)));
+-		  break;
+-
+-		case E_V2DFmode:
+-		  emit_insn (gen_vec_setv2df (target, temp, GEN_INT (i)));
+-		  break;
+-
+-		default:
+-		  gcc_unreachable ();
++		  /* Using vilvl to load lowest 2 elements simultaneously to
++		     reduce the number of instructions.  */
++		  if (i == 1)
++		    {
++		      op0 = gen_reg_rtx (imode);
++		      emit_move_insn (op0, val[0]);
++		      op1 = gen_reg_rtx (imode);
++		      emit_move_insn (op1, val[1]);
++		      emit_insn (loongarch_vec_repl2_128 (target, op0, op1));
++		    }
++		  else if (i > 1)
++		    {
++		      op0 = gen_reg_rtx (imode);
++		      emit_move_insn (op0, val[i]);
++		      emit_insn (
++			loongarch_vec_set128 (target, op0, GEN_INT (i)));
++		    }
++		}
++	      else
++		{
++		  if (half_same && i == nelt / 2)
++		    {
++		      emit_insn (
++			loongarch_vec_mirror (target, target, const0_rtx));
++		      return;
++		    }
++		  /* Assign the lowest element of val to all elements of
++		     target.  */
++		  if (i == 0)
++		    {
++		      op0 = gen_reg_rtx (imode);
++		      emit_move_insn (op0, val[0]);
++		      emit_insn (loongarch_vec_repl1_128 (target, op0));
++		    }
++		  else if (!rtx_equal_p (val[i], val[0]))
++		    {
++		      op0 = gen_reg_rtx (imode);
++		      emit_move_insn (op0, val[i]);
++		      emit_insn (
++			loongarch_vec_set128 (target, op0, GEN_INT (i)));
++		    }
+ 		}
+ 	    }
+ 	}
+@@ -10056,8 +10127,8 @@ loongarch_expand_vector_init (rtx target, rtx vals)
+   /* For two-part initialization, always use CONCAT.  */
+   if (nelt == 2)
+     {
+-      rtx op0 = force_reg (imode, XVECEXP (vals, 0, 0));
+-      rtx op1 = force_reg (imode, XVECEXP (vals, 0, 1));
++      rtx op0 = force_reg (imode, val[0]);
++      rtx op1 = force_reg (imode, val[1]);
+       x = gen_rtx_VEC_CONCAT (vmode, op0, op1);
+       emit_insn (gen_rtx_SET (target, x));
+       return;
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index a6962b271..688c67cc2 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -134,6 +134,8 @@
+   UNSPEC_LSX_VSTX
+   UNSPEC_LSX_VEXTL_QU_DU
+   UNSPEC_LSX_VSETEQZ_V
++  UNSPEC_LSX_VILVL_INTERNAL
++  UNSPEC_LSX_VREPLVEI_MIRROR
+ ])
+ 
+ ;; This attribute gives suffix for integers in VHMODE.
+@@ -1477,6 +1479,18 @@
+   [(set_attr "type" "simd_flog2")
+    (set_attr "mode" "<MODE>")])
+ 
++;; Only for loongarch_expand_vector_init in loongarch.cc.
++;; Merge two scalar floating-point op1 and op2 into a LSX op0.
++(define_insn "lsx_vilvl_<lsxfmt_f>_internal"
++  [(set (match_operand:FLSX 0 "register_operand" "=f")
++	(unspec:FLSX [(match_operand:<UNITMODE> 1 "register_operand" "f")
++		      (match_operand:<UNITMODE> 2 "register_operand" "f")]
++		     UNSPEC_LSX_VILVL_INTERNAL))]
++  "ISA_HAS_LSX"
++  "vilvl.<lsxfmt>\t%w0,%w2,%w1"
++  [(set_attr "type" "simd_permute")
++   (set_attr "mode" "<MODE>")])
++
+ (define_insn "smax<mode>3"
+   [(set (match_operand:FLSX 0 "register_operand" "=f")
+ 	(smax:FLSX (match_operand:FLSX 1 "register_operand" "f")
+@@ -2283,6 +2297,16 @@
+   [(set_attr "type" "simd_splat")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_insn "lsx_vreplvei_mirror_<lsxfmt_f>"
++  [(set (match_operand:LSX 0 "register_operand" "=f")
++	(unspec: LSX [(match_operand:LSX 1 "register_operand" "f")
++				(match_operand 2 "const_<indeximm>_operand" "")]
++				UNSPEC_LSX_VREPLVEI_MIRROR))]
++  "ISA_HAS_LSX"
++  "vreplvei.d\t%w0,%w1,%2"
++  [(set_attr "type" "simd_splat")
++   (set_attr "mode" "<MODE>")])
++
+ (define_insn "lsx_vreplvei_<lsxfmt_f>"
+   [(set (match_operand:LSX 0 "register_operand" "=f")
+ 	(vec_duplicate:LSX
+@@ -2444,6 +2468,99 @@
+   DONE;
+ })
+ 
++;; Implement vec_concatv2df by vilvl.d.
++(define_insn_and_split "vec_concatv2df"
++  [(set (match_operand:V2DF 0 "register_operand" "=f")
++	(vec_concat:V2DF
++	  (match_operand:DF 1 "register_operand" "f")
++	  (match_operand:DF 2 "register_operand" "f")))]
++  "ISA_HAS_LSX"
++  ""
++  "&& reload_completed"
++  [(const_int 0)]
++{
++  emit_insn (gen_lsx_vilvl_d_f (operands[0],
++				gen_rtx_REG (V2DFmode, REGNO (operands[1])),
++				gen_rtx_REG (V2DFmode, REGNO (operands[2]))));
++  DONE;
++}
++  [(set_attr "mode" "V2DF")])
++
++;; Implement vec_concatv4sf.
++;; Optimize based on hardware register allocation of operands.
++(define_insn_and_split "vec_concatv4sf"
++  [(set (match_operand:V4SF 0 "register_operand" "=f")
++	(vec_concat:V4SF
++	  (vec_concat:V2SF
++	    (match_operand:SF 1 "register_operand" "f")
++	    (match_operand:SF 2 "register_operand" "f"))
++	  (vec_concat:V2SF
++	    (match_operand:SF 3 "register_operand" "f")
++	    (match_operand:SF 4 "register_operand" "f"))))]
++  "ISA_HAS_LSX"
++  ""
++  "&& reload_completed"
++  [(const_int 0)]
++{
++  operands[5] = GEN_INT (1);
++  operands[6] = GEN_INT (2);
++  operands[7] = GEN_INT (4);
++  operands[8] = GEN_INT (8);
++
++  /* If all input are same, use vreplvei.w to broadcast.  */
++  if (REGNO (operands[1]) == REGNO (operands[2])
++      && REGNO (operands[1]) == REGNO (operands[3])
++      && REGNO (operands[1]) == REGNO (operands[4]))
++    {
++      emit_insn (gen_lsx_vreplvei_w_f_scalar (operands[0], operands[1]));
++    }
++  /* If op0 is equal to op3, use vreplvei.w to set each element of op0 as op3.
++     If other input is different from op3, use vextrins.w to insert.  */
++  else if (REGNO (operands[0]) == REGNO (operands[3]))
++    {
++      emit_insn (gen_lsx_vreplvei_w_f_scalar (operands[0], operands[3]));
++      if (REGNO (operands[1]) != REGNO (operands[3]))
++	emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[1],
++						operands[0], operands[5]));
++      if (REGNO (operands[2]) != REGNO (operands[3]))
++	emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[2],
++						operands[0], operands[6]));
++      if (REGNO (operands[4]) != REGNO (operands[3]))
++	emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[4],
++						operands[0], operands[8]));
++    }
++  /* If op0 is equal to op4, use vreplvei.w to set each element of op0 as op4.
++     If other input is different from op4, use vextrins.w to insert.  */
++  else if (REGNO (operands[0]) == REGNO (operands[4]))
++    {
++      emit_insn (gen_lsx_vreplvei_w_f_scalar (operands[0], operands[4]));
++      if (REGNO (operands[1]) != REGNO (operands[4]))
++	emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[1],
++						operands[0], operands[5]));
++      if (REGNO (operands[2]) != REGNO (operands[4]))
++	emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[2],
++						operands[0], operands[6]));
++      if (REGNO (operands[3]) != REGNO (operands[4]))
++	emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[3],
++						operands[0], operands[7]));
++    }
++  /* Otherwise, use vilvl.w to merge op1 and op2 first.
++     If op3 is different from op1, use vextrins.w to insert.
++     If op4 is different from op2, use vextrins.w to insert.  */
++  else
++    {
++      emit_insn (
++	gen_lsx_vilvl_w_f (operands[0],
++			   gen_rtx_REG (V4SFmode, REGNO (operands[1])),
++			   gen_rtx_REG (V4SFmode, REGNO (operands[2]))));
++      emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[3],
++					      operands[0], operands[7]));
++      emit_insn (gen_lsx_vextrins_w_f_scalar (operands[0], operands[4],
++					      operands[0], operands[8]));
++    }
++  DONE;
++}
++  [(set_attr "mode" "V4SF")])
+ 
+ (define_insn "vandn<mode>3"
+   [(set (match_operand:LSX 0 "register_operand" "=f")
+@@ -3455,3 +3572,20 @@
+         const0_rtx));
+   DONE;
+ })
++
++;; Delete one of two instructions that exactly play the same role.
++(define_peephole2
++  [(set (match_operand:V2DI 0 "register_operand")
++	(vec_duplicate:V2DI (match_operand:DI 1 "register_operand")))
++   (set (match_operand:V2DI 2 "register_operand")
++	(vec_merge:V2DI
++	  (vec_duplicate:V2DI (match_operand:DI 3 "register_operand"))
++	  (match_operand:V2DI 4 "register_operand")
++	  (match_operand 5 "const_int_operand")))]
++  "operands[0] == operands[2] &&
++   operands[1] == operands[3] &&
++   operands[2] == operands[4] &&
++   INTVAL (operands[5]) == 2"
++  [(set (match_dup 0)
++	(vec_duplicate:V2DI (match_dup 1)))]
++  "")
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/lasx-vec-construct-opt.c b/src/gcc/testsuite/gcc.target/loongarch/lasx-vec-construct-opt.c
+new file mode 100644
+index 000000000..487816a48
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/lasx-vec-construct-opt.c
+@@ -0,0 +1,102 @@
++/* { dg-do compile } */
++/* { dg-options "-mlasx -O3" } */
++
++#include <lasxintrin.h>
++
++extern long long *x_di;
++extern int *x_si;
++extern short int *x_hi;
++extern char *x_qi;
++extern double *y_df;
++extern float *y_sf;
++
++/* Remove some unnecessary vinsgr2vr.d as the corresponding elements
++   have already been set.  */
++/* { dg-final { scan-assembler-not "v4i64:.*\tvinsgr2vr\\.d.*v4i64" } } */
++/* { dg-final { scan-assembler-times "v4i64:.*\txvldrepl\\.d.*v4i64" 1 } } */
++v4i64
++vec_construct_v4i64 ()
++{
++  v4i64 res =
++  { x_di[0], x_di[0], x_di[1], x_di[1] }
++  ;
++  return res;
++}
++
++/* Remove some unnecessary vinsgr2vr.w as the corresponding elements
++   have already been set.  */
++/* { dg-final { scan-assembler-not "v8i32:.*\tvinsgr2vr\\.w.*v8i32" } } */
++/* { dg-final { scan-assembler-times "v8i32:.*\txvreplgr2vr\\.w.*v8i32" 1 } } */
++v8i32
++vec_construct_v8i32 ()
++{
++  v8i32 res =
++  { x_si[0], x_si[0], x_si[0], x_si[0], 
++    x_si[0], x_si[2], x_si[0], x_si[0] }
++  ;
++  return res;
++}
++
++/* Remove some unnecessary vinsgr2vr.h as the corresponding elements
++   have already been set.  */
++/* { dg-final { scan-assembler-not "v16i16:.*\tvori\\.b.*v16i16" } } */
++/* { dg-final { scan-assembler-times "v16i16:.*\txvreplgr2vr\\.h.*v16i1" 1 } } */
++v16i16
++vec_construct_v16i16 ()
++{
++  v16i16 res =
++  { x_hi[1], x_hi[2], x_hi[1], x_hi[1], 
++    x_hi[1], x_hi[1], x_hi[1], x_hi[1],
++    x_hi[1], x_hi[1], x_hi[1], x_hi[1], 
++    x_hi[1], x_hi[1], x_hi[1], x_hi[2] }
++  ;
++  return res;
++}
++
++/* Remove some unnecessary vinsgr2vr.b as the corresponding elements
++   have already been set.  */
++/* { dg-final { scan-assembler-not "v32i8:.*\tvori\\.b.*v32i8" } } */
++/* { dg-final { scan-assembler-times "v32i8:.*\txvreplgr2vr\\.b.*v32i8" 1 } } */
++v32i8
++vec_construct_v32i8 ()
++{
++  v32i8 res =
++  { x_qi[0], x_qi[0], x_qi[0], x_qi[0], 
++    x_qi[0], x_qi[0], x_qi[0], x_qi[0],
++    x_qi[0], x_qi[0], x_qi[0], x_qi[0],
++    x_qi[0], x_qi[0], x_qi[0], x_qi[2],
++    x_qi[0], x_qi[0], x_qi[0], x_qi[0], 
++    x_qi[0], x_qi[0], x_qi[0], x_qi[0], 
++    x_qi[0], x_qi[0], x_qi[0], x_qi[0], 
++    x_qi[0], x_qi[0], x_qi[0], x_qi[3] }
++  ;
++  return res;
++}
++
++/* Set 2 elements of a vector simultaneously by vilvl.d
++   and reducing more vextrins.d.  */
++/* { dg-final { scan-assembler-not "v4f64:.*\tvori\\.b.*v4f64" } } */
++/* { dg-final { scan-assembler-not "v4f64:.*\tvextrins\\.d.*v4f64" } } */
++/* { dg-final { scan-assembler-times "v4f64:.*\tvilvl\\.d.*v4f64" 1 } } */
++v4f64
++vec_construct_v4f64 ()
++{
++  v4f64 res =
++  { y_df[0], y_df[2], y_df[0], y_df[0]} 
++  ;
++  return res;
++}
++
++/* Set 2 elements of a vector simultaneously by vilvl.w
++   and reducing more vextrins.w.  */
++/* { dg-final { scan-assembler-not "v8f32:.*\tvextrins\\.w.*v8f32" } } */
++/* { dg-final { scan-assembler-times "v8f32:.*\txvilvl\\.w.*v8f32" 1 } } */
++v8f32
++vec_construct_v8f32 ()
++{
++  v8f32 res =
++  { y_sf[2], y_sf[1], y_sf[2], y_sf[3], 
++    y_sf[2], y_sf[1], y_sf[2], y_sf[3] }
++  ;
++  return res;
++}
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/lsx-vec-construct-opt.c b/src/gcc/testsuite/gcc.target/loongarch/lsx-vec-construct-opt.c
+new file mode 100644
+index 000000000..92da1c8af
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/lsx-vec-construct-opt.c
+@@ -0,0 +1,85 @@
++/* { dg-do compile } */
++/* { dg-options "-mlsx -O3" } */
++
++#include <lsxintrin.h>
++
++extern long long *x_di;
++extern int *x_si;
++extern short int *x_hi;
++extern char *x_qi;
++extern double *y_df;
++extern float *y_sf;
++
++/* No change for V2DI mode.  */
++v2i64
++vec_construct_v2i64 ()
++{
++  v2i64 res =
++  { x_di[1], x_di[0]}
++  ;
++  return res;
++}
++
++/* Only load the lowest 2 elements and directly copy them to high half-part,
++   reducing more vinsgr2vr.w.  */
++/* { dg-final { scan-assembler-times "v4i32:.*\tvreplvei\\.d.*v4i32" 1 } } */
++v4i32
++vec_construct_v4i32 ()
++{
++  v4i32 res =
++  { x_si[0], x_si[1], x_si[0], x_si[1]} 
++  ;
++  return res;
++}
++
++/* Only load the lowest 4 elements and directly copy them to high half-part,
++   reducing more vinsgr2vr.h.  */
++/* { dg-final { scan-assembler-times "v8i16:.*\tvreplvei\\.d.*v8i16" 1 } } */
++v8i16
++vec_construct_v8i16 ()
++{
++  v8i16 res =
++  { x_hi[0], x_hi[0], x_hi[0], x_hi[1], 
++    x_hi[0], x_hi[0], x_hi[0], x_hi[1] }
++  ;
++  return res;
++}
++
++/* Only load the lowest 8 elements and directly copy them to high half-part,
++   reducing more vinsgr2vr.b.  */
++/* { dg-final { scan-assembler-times "v16i8:.*\tvreplvei\\.d.*v16i8" 1 } } */
++v16i8
++vec_construct_v16i8 ()
++{
++  v16i8 res =
++  { x_qi[0], x_qi[1], x_qi[0], x_qi[2], 
++    x_qi[0], x_qi[0], x_qi[0], x_qi[3],
++    x_qi[0], x_qi[1], x_qi[0], x_qi[2], 
++    x_qi[0], x_qi[0], x_qi[0], x_qi[3] }
++  ;
++  return res;
++}
++
++/* Set 2 elements of a vector simultaneously by vilvl.d.  */
++/* { dg-final { scan-assembler-not "v2f64:.*\tvextrins\\.d.*v2f64" } } */
++/* { dg-final { scan-assembler-times "v2f64:.*\tvilvl\\.d.*v2f64" 1 } } */
++v2f64
++vec_construct_v2f64 ()
++{
++  v2f64 res =
++  { y_df[0], y_df[2] } 
++  ;
++  return res;
++}
++
++/* Set 2 elements of a vector simultaneously by vilvl.w
++   and reducing more vextrins.w.  */
++/* { dg-final { scan-assembler-times "v4f32:.*\tvilvl\\.w.*v4f32" 1 } } */
++v4f32
++vec_construct_v4f32 ()
++{
++  v4f32 res =
++  { y_sf[0], y_sf[1], y_sf[0], y_sf[0] }
++  ;
++  return res;
++}
+-- 
+2.39.3
+

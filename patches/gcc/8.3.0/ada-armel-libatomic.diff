@@ -1,0 +1,39 @@
+Description: link libgnat with libatomic on armel
+ On other architectures, the link step does not change because we link
+ with --as-needed (ada-link-lib.diff).
+ .
+ Libatomic becomes an artificial dependency for Ada in Makefile.def,
+ so a better solution is welcome.
+ .
+ Please read ada-changes-in-autogen-output.diff about src/Makefile.def.
+ .
+ TODO: if this caused by ada-arm.diff, merge the two patches.
+Bug-Debian: https://bugs.debian.org/861734
+Author: Matthias Klose <doko@debian.org>
+Author: Nicolas Boulenguez <nicolas@debian.org>
+
+Index: b/src/gcc/ada/gcc-interface/Makefile.in
+===================================================================
+--- a/src/gcc/ada/gcc-interface/Makefile.in
++++ b/src/gcc/ada/gcc-interface/Makefile.in
+@@ -1580,6 +1580,7 @@ endif
+ 
+ # ARM linux, GNU eabi
+ ifeq ($(strip $(filter-out arm% linux-gnueabi%,$(target_cpu) $(target_os))),)
++  MISCLIB = -L../../../$(target_alias)/libatomic/.libs -latomic
+   LIBGNAT_TARGET_PAIRS = \
+   a-intnam.ads<libgnarl/a-intnam__linux.ads \
+   s-inmaop.adb<libgnarl/s-inmaop__posix.adb \
+Index: b/src/Makefile.def
+===================================================================
+--- a/src/Makefile.def
++++ b/src/Makefile.def
+@@ -398,6 +398,8 @@ dependencies = { module=all-gnattools; o
+ dependencies = { module=all-gnattools; on=all-target-libgnatvsn; };
+ dependencies = { module=all-target-libgnatvsn; on=all-target-libada; };
+ 
++dependencies = { module=all-target-libada; on=all-target-libatomic; };
++
+ // Depending on the specific configuration, the LTO plugin will either use the
+ // generic libiberty build or the specific build for linker plugins.
+ dependencies = { module=all-lto-plugin; on=all-libiberty; };

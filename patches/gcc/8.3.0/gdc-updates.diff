@@ -1,0 +1,30 @@
+# DP: gdc updates up to 20160115.
+
+	* Make-lang.in (d-warn): Filter out -Wmissing-format-attribute.
+
+Index: b/src/gcc/d/Make-lang.in
+===================================================================
+--- a/src/gcc/d/Make-lang.in
++++ b/src/gcc/d/Make-lang.in
+@@ -46,7 +46,7 @@ gdc-cross$(exeext): gdc$(exeext)
+ 	cp gdc$(exeext) gdc-cross$(exeext)
+ 
+ # Filter out pedantic and virtual overload warnings.
+-d-warn = $(filter-out -pedantic -Woverloaded-virtual, $(STRICT_WARN))
++d-warn = $(filter-out -pedantic -Woverloaded-virtual -Wmissing-format-attribute, $(STRICT_WARN))
+ 
+ # Also filter out warnings for missing format attributes in the D Frontend.
+ DMD_WARN_CXXFLAGS = $(filter-out -Wmissing-format-attribute, $(WARN_CXXFLAGS))
+Index: b/src/libphobos/src/std/internal/math/gammafunction.d
+===================================================================
+--- a/src/libphobos/src/std/internal/math/gammafunction.d
++++ b/src/libphobos/src/std/internal/math/gammafunction.d
+@@ -460,7 +460,7 @@ real logGamma(real x)
+         if ( p == q )
+             return real.infinity;
+         int intpart = cast(int)(p);
+-        real sgngam = 1;
++        real sgngam = 1.0L;
+         if ( (intpart & 1) == 0 )
+             sgngam = -1;
+         z = q - p;

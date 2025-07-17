@@ -1,0 +1,106 @@
+Description: add support for GNU/kFreeBSD.
+ GNU/kFreeBSD does not support Thread Priority Protection or Thread
+ Priority Inheritance and lacks some pthread_mutexattr_* functions.
+ Replace them with dummy versions.
+Bug-Debian: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=642128
+Author: Ludovic Brenta <lbrenta@debian.org>
+Author: Nicolas Boulenguez <nicolas@debian.org>
+
+Index: b/src/gcc/ada/libgnarl/s-osinte__kfreebsd-gnu.ads
+===================================================================
+--- a/src/gcc/ada/libgnarl/s-osinte__kfreebsd-gnu.ads
++++ b/src/gcc/ada/libgnarl/s-osinte__kfreebsd-gnu.ads
+@@ -45,6 +45,7 @@ package System.OS_Interface is
+    pragma Preelaborate;
+ 
+    pragma Linker_Options ("-lpthread");
++   pragma Linker_Options ("-lrt");
+ 
+    subtype int            is Interfaces.C.int;
+    subtype char           is Interfaces.C.char;
+@@ -206,9 +207,7 @@ package System.OS_Interface is
+    function nanosleep (rqtp, rmtp : access timespec) return int;
+    pragma Import (C, nanosleep, "nanosleep");
+ 
+-   type clockid_t is private;
+-
+-   CLOCK_REALTIME : constant clockid_t;
++   type clockid_t is new int;
+ 
+    function clock_gettime
+      (clock_id : clockid_t;
+@@ -441,31 +440,25 @@ package System.OS_Interface is
+    PTHREAD_PRIO_PROTECT : constant := 2;
+    PTHREAD_PRIO_INHERIT : constant := 1;
+ 
++   --  GNU/kFreeBSD does not support Thread Priority Protection or Thread
++   --  Priority Inheritance and lacks some pthread_mutexattr_* functions.
++   --  Replace them with dummy versions.
++
+    function pthread_mutexattr_setprotocol
+      (attr     : access pthread_mutexattr_t;
+-      protocol : int) return int;
+-   pragma Import
+-      (C, pthread_mutexattr_setprotocol, "pthread_mutexattr_setprotocol");
++      protocol : int) return int is (0);
+ 
+    function pthread_mutexattr_getprotocol
+      (attr     : access pthread_mutexattr_t;
+-      protocol : access int) return int;
+-   pragma Import
+-     (C, pthread_mutexattr_getprotocol, "pthread_mutexattr_getprotocol");
++     protocol : access int) return int is (0);
+ 
+    function pthread_mutexattr_setprioceiling
+      (attr     : access pthread_mutexattr_t;
+-      prioceiling : int) return int;
+-   pragma Import
+-     (C, pthread_mutexattr_setprioceiling,
+-      "pthread_mutexattr_setprioceiling");
++      prioceiling : int) return int is (0);
+ 
+    function pthread_mutexattr_getprioceiling
+      (attr     : access pthread_mutexattr_t;
+-      prioceiling : access int) return int;
+-   pragma Import
+-     (C, pthread_mutexattr_getprioceiling,
+-      "pthread_mutexattr_getprioceiling");
++      prioceiling : access int) return int is (0);
+ 
+    type struct_sched_param is record
+       sched_priority : int;  --  scheduling priority
+@@ -610,9 +603,6 @@ private
+    end record;
+    pragma Convention (C, timespec);
+ 
+-   type clockid_t is new int;
+-   CLOCK_REALTIME : constant clockid_t := 0;
+-
+    type pthread_attr_t is record
+       detachstate   : int;
+       schedpolicy   : int;
+Index: b/src/gcc/ada/gsocket.h
+===================================================================
+--- a/src/gcc/ada/gsocket.h
++++ b/src/gcc/ada/gsocket.h
+@@ -244,6 +244,7 @@
+ #endif
+ 
+ #if defined (__FreeBSD__) || defined (__vxworks) || defined(__rtems__) \
++ || defined (__FreeBSD_kernel__) || defined(__GNU__) \
+  || defined (__DragonFly__) || defined (__NetBSD__) || defined (__OpenBSD__)
+ # define Has_Sockaddr_Len 1
+ #else
+Index: b/src/gcc/ada/s-oscons-tmplt.c
+===================================================================
+--- a/src/gcc/ada/s-oscons-tmplt.c
++++ b/src/gcc/ada/s-oscons-tmplt.c
+@@ -1443,7 +1443,7 @@ CND(CLOCK_THREAD_CPUTIME_ID, "Thread CPU
+ 
+ #if defined(__linux__) || defined(__FreeBSD__) \
+  || (defined(_AIX) && defined(_AIXVERSION_530)) \
+- || defined(__DragonFly__) || defined(__QNX__)
++ || defined(__DragonFly__) || defined(__QNX__) || defined(__FreeBSD_kernel__)
+ /** On these platforms use system provided monotonic clock instead of
+  ** the default CLOCK_REALTIME. We then need to set up cond var attributes
+  ** appropriately (see thread.c).

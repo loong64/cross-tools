@@ -1,0 +1,36 @@
+# DP: Don't use any relative path names for the standard include paths.
+
+Index: b/src/gcc/incpath.c
+===================================================================
+--- a/src/gcc/incpath.c
++++ b/src/gcc/incpath.c
+@@ -172,6 +172,14 @@ add_standard_paths (const char *sysroot,
+ 			str = reconcat (str, str, dir_separator_str,
+ 					imultiarch, NULL);
+ 		    }
++		  {
++		    char *rp = lrealpath (str);
++		    if (rp)
++		      {
++			free (str);
++			str = rp;
++		      }
++		  }
+ 		  add_path (str, INC_SYSTEM, p->cxx_aware, false);
+ 		}
+ 	    }
+@@ -246,6 +254,14 @@ add_standard_paths (const char *sysroot,
+ 	      else
+ 		str = reconcat (str, str, dir_separator_str, imultiarch, NULL);
+ 	    }
++	  {
++	    char *rp = lrealpath (str);
++	    if (rp)
++	      {
++		free (str);
++		str = rp;
++	      }
++	  }
+ 
+ 	  add_path (str, INC_SYSTEM, p->cxx_aware, false);
+ 	}

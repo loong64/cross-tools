@@ -1,0 +1,301 @@
+From 5f589ce713de159a70757deccfab985a6dc62a0c Mon Sep 17 00:00:00 2001
+From: Jiahao Xu <xujiahao@loongson.cn>
+Date: Fri, 26 Aug 2022 15:22:17 +0800
+Subject: [PATCH 02/28] Improve the definition of lasx/lsx instructions
+ template
+
+Change-Id: I3521741f462583fccab1da103992b33e875736f1
+---
+ src/gcc/config/loongarch/lasx.md              | 143 ++++++++++++++++--
+ src/gcc/config/loongarch/loongarch-builtins.c |   4 +
+ src/gcc/config/loongarch/loongarch-protos.h   |   1 -
+ src/gcc/config/loongarch/lsx.md               |  12 +-
+ src/gcc/config/loongarch/predicates.md        |   8 +
+ 5 files changed, 149 insertions(+), 19 deletions(-)
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index 06dace26f..51989b3bf 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -561,11 +561,11 @@
+ })
+ 
+ (define_insn "lasx_xvinsgr2vr_<lasxfmt_f_wd>"
+-  [(set (match_operand:LASX_WD 0 "register_operand" "=f")
+-	(vec_merge:LASX_WD
+-	  (vec_duplicate:LASX_WD
++  [(set (match_operand:ILASX_DW 0 "register_operand" "=f")
++	(vec_merge:ILASX_DW
++	  (vec_duplicate:ILASX_DW
+ 	    (match_operand:<UNITMODE> 1 "reg_or_0_operand" "rJ"))
+-	  (match_operand:LASX_WD 2 "register_operand" "0")
++	  (match_operand:ILASX_DW 2 "register_operand" "0")
+ 	  (match_operand 3 "const_<bitmask256>_operand" "")))]
+   "ISA_HAS_LASX"
+ {
+@@ -720,6 +720,30 @@
+   [(set_attr "type" "simd_copy")
+    (set_attr "mode" "V4DI")])
+ 
++(define_expand "vec_set<mode>"
++  [(match_operand:ILASX_DW 0 "register_operand")
++   (match_operand:<UNITMODE> 1 "reg_or_0_operand")
++   (match_operand 2 "const_<indeximm256>_operand")]
++  "ISA_HAS_LASX"
++{
++  rtx index = GEN_INT (1 << INTVAL (operands[2]));
++  emit_insn (gen_lasx_xvinsgr2vr_<lasxfmt_f_wd> (operands[0], operands[1],
++                      operands[0], index));
++  DONE;
++})
++
++(define_expand "vec_set<mode>"
++  [(match_operand:FLASX 0 "register_operand")
++   (match_operand:<UNITMODE> 1 "reg_or_0_operand")
++   (match_operand 2 "const_<indeximm256>_operand")]
++  "ISA_HAS_LASX"
++{
++  rtx index = GEN_INT (1 << INTVAL (operands[2]));
++  emit_insn (gen_lasx_xvinsve0_<lasxfmt_f>_scalar (operands[0], operands[1],
++                      operands[0], index));
++  DONE;
++})
++
+ (define_expand "vec_extract<mode><unitmode>"
+   [(match_operand:<UNITMODE> 0 "register_operand")
+    (match_operand:LASX 1 "register_operand")
+@@ -1476,7 +1500,7 @@
+    (set_attr "mode" "<MODE>")
+    (set_attr "length" "8")])
+ 
+-(define_insn "lasx_xvflogb_<flasxfmt>"
++(define_insn "logb<mode>2"
+   [(set (match_operand:FLASX 0 "register_operand" "=f")
+ 	(unspec:FLASX [(match_operand:FLASX 1 "register_operand" "f")]
+ 		     UNSPEC_LASX_XVFLOGB))]
+@@ -2290,6 +2314,35 @@
+   [(set_attr "type" "simd_shf")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_insn "lasx_xvshuf4i_<lasxfmt_f>_1"
++  [(set (match_operand:LASX_W 0 "register_operand" "=f")
++    (vec_select:LASX_W
++      (match_operand:LASX_W 1 "nonimmediate_operand" "f")
++      (parallel [(match_operand 2 "const_0_to_3_operand")
++             (match_operand 3 "const_0_to_3_operand")
++             (match_operand 4 "const_0_to_3_operand")
++             (match_operand 5 "const_0_to_3_operand")
++             (match_operand 6 "const_4_to_7_operand")
++             (match_operand 7 "const_4_to_7_operand")
++             (match_operand 8 "const_4_to_7_operand")
++             (match_operand 9 "const_4_to_7_operand")])))]
++  "ISA_HAS_LASX
++   && INTVAL (operands[2]) + 4 == INTVAL (operands[6])
++   && INTVAL (operands[3]) + 4 == INTVAL (operands[7])
++   && INTVAL (operands[4]) + 4 == INTVAL (operands[8])
++   && INTVAL (operands[5]) + 4 == INTVAL (operands[9])"
++{
++  int mask = 0;
++  mask |= INTVAL (operands[2]) << 0;
++  mask |= INTVAL (operands[3]) << 2;
++  mask |= INTVAL (operands[4]) << 4;
++  mask |= INTVAL (operands[5]) << 6;
++  operands[2] = GEN_INT (mask);
++
++  return "xvshuf4i.w\t%u0,%u1,%2";
++}
++  [(set_attr "type" "simd_shf")
++   (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "lasx_xvsrar_<lasxfmt>"
+   [(set (match_operand:ILASX 0 "register_operand" "=f")
+@@ -4623,16 +4676,52 @@
+   [(set_attr "type" "simd_shift")
+    (set_attr "mode" "<MODE>")])
+ 
+-(define_insn "lasx_xvpermi_w"
+-  [(set (match_operand:V8SI 0 "register_operand" "=f")
+-	(unspec:V8SI [(match_operand:V8SI 1 "register_operand" "0")
+-               (match_operand:V8SI 2 "register_operand" "f")
+-	     	       (match_operand 3 "const_uimm8_operand" "")]
+-		     UNSPEC_LASX_XVPERMI))]
++(define_mode_attr VDOUBLEMODEW256
++  [(V8SI "V16SI")
++   (V8SF "V16SF")])
++
++(define_insn "lasx_xvpermi_<lasxfmt_f_wd>"
++  [(set (match_operand:LASX_W 0 "register_operand" "=f")
++    (unspec:LASX_W [(match_operand:LASX_W 1 "register_operand" "0")
++               (match_operand:LASX_W 2 "register_operand" "f")
++                   (match_operand 3 "const_uimm8_operand" "")]
++             UNSPEC_LASX_XVPERMI))]
+   "ISA_HAS_LASX"
+   "xvpermi.w\t%u0,%u2,%3"
+   [(set_attr "type" "simd_bit")
+-   (set_attr "mode" "V8SI")])
++   (set_attr "mode" "<MODE>")])
++
++(define_insn "lasx_xvpermi_<lasxfmt_f_wd>_1"
++  [(set (match_operand:LASX_W 0 "register_operand" "=f")
++     (vec_select:LASX_W
++       (vec_concat:<VDOUBLEMODEW256>
++         (match_operand:LASX_W 1 "register_operand" "f")
++         (match_operand:LASX_W 2 "register_operand" "0"))
++       (parallel [(match_operand 3  "const_0_to_3_operand")
++              (match_operand 4  "const_0_to_3_operand"  )
++              (match_operand 5  "const_8_to_11_operand" )
++              (match_operand 6  "const_8_to_11_operand" )
++              (match_operand 7  "const_4_to_7_operand"  )
++              (match_operand 8  "const_4_to_7_operand"  )
++              (match_operand 9  "const_12_to_15_operand")
++              (match_operand 10 "const_12_to_15_operand")])))]
++  "ISA_HAS_LASX
++  && INTVAL (operands[3]) + 4 == INTVAL (operands[7])
++  && INTVAL (operands[4]) + 4 == INTVAL (operands[8])
++  && INTVAL (operands[5]) + 4 == INTVAL (operands[9])
++  && INTVAL (operands[6]) + 4 == INTVAL (operands[10])"
++{
++  int mask = 0;
++  mask |= INTVAL (operands[3]) << 0;
++  mask |= INTVAL (operands[4]) << 2;
++  mask |= (INTVAL (operands[5]) - 8) << 4;
++  mask |= (INTVAL (operands[6]) - 8) << 6;
++  operands[3] = GEN_INT (mask);
++
++  return "xvpermi.w\t%u0,%u1,%3";
++}
++  [(set_attr "type" "simd_bit")
++   (set_attr "mode" "<MODE>")])
+ 
+ (define_expand "lasx_xvld"
+   [(match_operand:V32QI 0 "register_operand")
+@@ -4696,6 +4785,18 @@
+   [(set_attr "type" "simd_shf")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_insn "lasx_xvinsve0_<lasxfmt_f>_scalar"
++  [(set (match_operand:FLASX 0 "register_operand" "=f")
++    (vec_merge:FLASX
++      (vec_duplicate:FLASX
++        (match_operand:<UNITMODE> 1 "register_operand" "f"))
++      (match_operand:FLASX 2 "register_operand" "0")
++      (match_operand 3 "const_<bitmask256>_operand" "")))]
++  "ISA_HAS_LASX"
++  "xvinsve0.<lasxfmt>\t%u0,%u1,%y3"
++  [(set_attr "type" "simd_insert")
++   (set_attr "mode" "<MODE>")])
++
+ (define_insn "lasx_xvpickve_<lasxfmt_f>"
+   [(set (match_operand:LASX_WD 0 "register_operand" "=f")
+ 	(unspec:LASX_WD [(match_operand:LASX_WD 1 "register_operand" "f")
+@@ -4790,6 +4891,24 @@
+   [(set_attr "type" "simd_store")
+    (set_attr "mode" "DI")])
+ 
++(define_insn "vec_widen_<su>mult_even_v8si"
++  [(set (match_operand:V4DI 0 "register_operand" "=f")
++    (mult:V4DI
++      (any_extend:V4DI
++        (vec_select:V4SI
++          (match_operand:V8SI 1 "register_operand" "%f")
++          (parallel [(const_int 0) (const_int 2)
++                         (const_int 4) (const_int 6)])))
++      (any_extend:V4DI
++        (vec_select:V4SI
++          (match_operand:V8SI 2 "register_operand" "f")
++          (parallel [(const_int 0) (const_int 2)
++             (const_int 4) (const_int 6)])))))]
++  "ISA_HAS_LASX"
++  "xvmulwev.d.w<u>\t%u0,%u1,%u2"
++  [(set_attr "type" "simd_int_arith")
++   (set_attr "mode" "V4DI")])
++
+ ;; Vector reduction operation
+ (define_expand "reduc_plus_scal_v4di"
+   [(match_operand:DI 0 "register_operand")
+diff --git a/src/gcc/config/loongarch/loongarch-builtins.c b/src/gcc/config/loongarch/loongarch-builtins.c
+index 1de105ffe..eb2c42245 100644
+--- a/src/gcc/config/loongarch/loongarch-builtins.c
++++ b/src/gcc/config/loongarch/loongarch-builtins.c
+@@ -313,6 +313,8 @@ AVAIL_ALL (lasx, ISA_HAS_LASX)
+ #define CODE_FOR_lsx_vfmin_d CODE_FOR_sminv2df3
+ #define CODE_FOR_lsx_vfsqrt_s CODE_FOR_sqrtv4sf2
+ #define CODE_FOR_lsx_vfsqrt_d CODE_FOR_sqrtv2df2
++#define CODE_FOR_lsx_vflogb_s CODE_FOR_logbv4sf2
++#define CODE_FOR_lsx_vflogb_d CODE_FOR_logbv2df2
+ #define CODE_FOR_lsx_vmax_b CODE_FOR_smaxv16qi3
+ #define CODE_FOR_lsx_vmax_h CODE_FOR_smaxv8hi3
+ #define CODE_FOR_lsx_vmax_w CODE_FOR_smaxv4si3
+@@ -578,6 +580,8 @@ AVAIL_ALL (lasx, ISA_HAS_LASX)
+ #define	CODE_FOR_lasx_xvfmin_d	CODE_FOR_sminv4df3
+ #define	CODE_FOR_lasx_xvfsqrt_s	CODE_FOR_sqrtv8sf2
+ #define	CODE_FOR_lasx_xvfsqrt_d	CODE_FOR_sqrtv4df2
++#define CODE_FOR_lasx_xvflogb_s CODE_FOR_logbv8sf2
++#define CODE_FOR_lasx_xvflogb_d CODE_FOR_logbv4df2
+ #define	CODE_FOR_lasx_xvmax_b	CODE_FOR_smaxv32qi3
+ #define	CODE_FOR_lasx_xvmax_h	CODE_FOR_smaxv16hi3
+ #define	CODE_FOR_lasx_xvmax_w	CODE_FOR_smaxv8si3
+diff --git a/src/gcc/config/loongarch/loongarch-protos.h b/src/gcc/config/loongarch/loongarch-protos.h
+index 210805cc5..3ca4917c5 100644
+--- a/src/gcc/config/loongarch/loongarch-protos.h
++++ b/src/gcc/config/loongarch/loongarch-protos.h
+@@ -204,6 +204,5 @@ extern rtx loongarch_expand_builtin (tree, rtx, rtx subtarget ATTRIBUTE_UNUSED,
+ extern tree loongarch_builtin_vectorized_function (unsigned int, tree, tree);
+ extern rtx loongarch_gen_const_int_vector_shuffle (machine_mode, int);
+ extern tree loongarch_build_builtin_va_list (void);
+-
+ extern rtx loongarch_build_signbit_mask (machine_mode, bool, bool);
+ #endif /* ! GCC_LARCH_PROTOS_H */
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index 914ca270e..fa7943be0 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -516,12 +516,12 @@
+   DONE;
+ })
+ 
+-(define_insn "lsx_vinsgr2vr_<lsxfmt_f>"
+-  [(set (match_operand:LSX 0 "register_operand" "=f")
+-	(vec_merge:LSX
+-	  (vec_duplicate:LSX
++(define_insn "lsx_vinsgr2vr_<lsxfmt>"
++  [(set (match_operand:ILSX 0 "register_operand" "=f")
++	(vec_merge:ILSX
++	  (vec_duplicate:ILSX
+ 	    (match_operand:<UNITMODE> 1 "reg_or_0_operand" "rJ"))
+-	  (match_operand:LSX 2 "register_operand" "0")
++	  (match_operand:ILSX 2 "register_operand" "0")
+ 	  (match_operand 3 "const_<bitmask>_operand" "")))]
+   "ISA_HAS_LSX"
+ {
+@@ -1404,7 +1404,7 @@
+   DONE;
+ })
+ 
+-(define_insn "lsx_vflogb_<flsxfmt>"
++(define_insn "logb<mode>2"
+   [(set (match_operand:FLSX 0 "register_operand" "=f")
+ 	(unspec:FLSX [(match_operand:FLSX 1 "register_operand" "f")]
+ 		     UNSPEC_LSX_VFLOGB))]
+diff --git a/src/gcc/config/loongarch/predicates.md b/src/gcc/config/loongarch/predicates.md
+index 46c781a58..daacaf003 100644
+--- a/src/gcc/config/loongarch/predicates.md
++++ b/src/gcc/config/loongarch/predicates.md
+@@ -223,6 +223,14 @@
+   (and (match_code "const_int")
+        (match_test "IN_RANGE (INTVAL (op), 0, 7)")))
+ 
++(define_predicate "const_8_to_11_operand"
++  (and (match_code "const_int")
++       (match_test "IN_RANGE (INTVAL (op), 8, 11)")))
++
++(define_predicate "const_12_to_15_operand"
++  (and (match_code "const_int")
++       (match_test "IN_RANGE (INTVAL (op), 12, 15)")))
++
+ (define_predicate "const_16_to_31_operand"
+   (and (match_code "const_int")
+        (match_test "IN_RANGE (INTVAL (op), 0, 7)")))
+-- 
+2.31.1
+

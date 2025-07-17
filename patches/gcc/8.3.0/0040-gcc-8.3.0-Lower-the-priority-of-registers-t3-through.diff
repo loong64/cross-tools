@@ -1,0 +1,49 @@
+From 14a29beb9eb43fa2fc31ccd14603835cc04cd556 Mon Sep 17 00:00:00 2001
+From: Jiahao Xu <xujiahao@loongson.cn>
+Date: Fri, 4 Aug 2023 17:42:57 +0800
+Subject: [PATCH 12/13] gcc-8.3.0: Lower the priority of registers t3 through
+ t8.
+
+gcc/ChangeLog:
+         * config/loongarch/loongarch.c (loongarch_register_priority): New function.
+
+Change-Id: I9fe434ab8f279f9034f7f10ea693e2f8c7979a14
+---
+ src/gcc/config/loongarch/loongarch.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index b69bb6f94..9913df055 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -6443,6 +6443,18 @@ loongarch_register_move_cost (machine_mode mode, reg_class_t from,
+   return 0;
+ }
+ 
++/* Return a register priority for hard reg REGNO.  */
++
++static int
++loongarch_register_priority (int regno)
++{
++  /* Lower the priority of registers t3 through t8. */
++  if (IN_RANGE (regno, GP_REG_FIRST + 15, GP_REG_FIRST + 20))
++    return 1;
++
++  return 2;
++}
++
+ /* Implement TARGET_MEMORY_MOVE_COST.  */
+ 
+ static int
+@@ -10784,6 +10796,8 @@ loongarch_prefetch_cookie (rtx write, rtx locality)
+ #undef TARGET_REGISTER_MOVE_COST
+ #define TARGET_REGISTER_MOVE_COST loongarch_register_move_cost
+ #undef TARGET_MEMORY_MOVE_COST
++#undef TARGET_REGISTER_PRIORITY
++#define TARGET_REGISTER_PRIORITY loongarch_register_priority
+ #define TARGET_MEMORY_MOVE_COST loongarch_memory_move_cost
+ #undef TARGET_RTX_COSTS
+ #define TARGET_RTX_COSTS loongarch_rtx_costs
+-- 
+2.31.1
+

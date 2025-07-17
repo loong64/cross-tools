@@ -1,0 +1,330 @@
+# DP: - Introduce a new shared library named libgnatvsn, containing
+# DP:   common components of GNAT under the GNAT-Modified GPL, for
+# DP:   use in GNAT tools, ASIS, GLADE and GPS.   Link the gnat tools
+# DP:   against this new library.
+
+# Please read ada-changes-in-autogen-output.diff about src/Makefile.def.
+
+# !!! Must be applied after ada-link-lib.diff
+
+--- /dev/null
++++ b/src/libgnatvsn/configure
+@@ -0,0 +1,34 @@
++#!/bin/sh
++
++# Minimal configure script for libgnatvsn.  We're only interested in
++# a few parameters.
++
++{
++
++for arg in $*; do
++    case ${arg} in
++	--prefix=*)
++	    prefix=`expr ${arg} : '--prefix=\(.\+\)'`;;
++	--srcdir=*)
++	    srcdir=`expr ${arg} : '--srcdir=\(.\+\)'`;;
++	--libdir=*)
++	    libdir=`expr ${arg} : '--libdir=\(.\+\)'`;;
++	--with-pkgversion=*)
++	    pkgversion=`expr ${arg} : '--with-pkgversion=\(.\+\)'`;;
++	--with-bugurl=*)
++	    bugurl=`expr ${arg} : '--with-bugurl=\(.\+\)'`;;
++	*)
++	    echo "Warning: ignoring option: ${arg}"
++    esac
++done
++
++sed_script=
++for name in prefix srcdir libdir pkgversion bugurl; do
++    eval value=\$$name
++    echo "$name: $value"
++    sed_script="$sed_script;s,@$name@,$value,"
++done
++echo "Creating Makefile..."
++sed "$sed_script" "$srcdir/Makefile.in" > Makefile
++
++} | tee -a config.log
+--- /dev/null
++++ b/src/libgnatvsn/gnatvsn.gpr.sed
+@@ -0,0 +1,8 @@
++library project Gnatvsn is
++   for Library_Name use "gnatvsn";
++   for Library_Kind use "dynamic";
++   for Library_Dir use "lib_inst_dir";
++   for Source_Dirs use ("src_inst_dir");
++   for Library_ALI_Dir use "ali_inst_dir";
++   for Externally_Built use "true";
++end Gnatvsn;
+--- /dev/null
++++ b/src/libgnatvsn/Makefile.in
+@@ -0,0 +1,161 @@
++# Makefile for libgnatvsn.
++#   Copyright (c) 2006 Ludovic Brenta <ludovic@ludovic-brenta.org>
++#   Copyright (c) 2017 Nicolas Boulenguez <nicolas@debian.org>
++#
++# This file is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program; if not, write to the Free Software
++# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
++
++# Parameters substituted by configure during Makefile generation
++prefix                                 := @prefix@
++srcdir                                 := @srcdir@
++libdir                                 := @libdir@
++pkgversion                             := @pkgversion@
++bugurl                                 := @bugurl@
++
++# Parameters expected in environment or command line
++$(foreach v, \
++  ADA_CFLAGS ADAFLAGS CC CFLAGS CPPFLAGS DESTDIR INSTALL INSTALL_DATA LDFLAGS \
++ ,$(info $(v) ($(origin $(v))) = $($(v))))
++# It seems that both CFLAGS/ADA_CFLAGS should affect both Ada/C.
++
++# Parameters read from external files
++BASEVER   := $(shell cat $(srcdir)/../gcc/BASE-VER)
++DEVPHASE  := $(shell cat $(srcdir)/../gcc/DEV-PHASE)
++DATESTAMP := $(shell cat $(srcdir)/../gcc/DATESTAMP)
++
++# Public and default targets
++.PHONY: all install clean
++all:
++
++######################################################################
++
++LIB_VERSION := $(shell expr '$(BASEVER)' : '\([0-9]\+\)')
++
++src_inst_dir := $(prefix)/share/ada/adainclude/gnatvsn
++gpr_inst_dir := $(prefix)/share/gpr
++ali_inst_dir := $(libdir)/ada/adalib/gnatvsn
++lib_inst_dir := $(libdir)
++
++# Initial value of variables accumulationg build flags.
++adaflags := -gnatn
++cflags   :=
++cppflags :=
++ldflags  := -Wl,--as-needed -Wl,-z,defs
++ldlibs   :=
++
++# For use in version.c - double quoted strings, with appropriate
++# surrounding punctuation and spaces, and with the datestamp and
++# development phase collapsed to the empty string in release mode
++# (i.e. if DEVPHASE_c is empty).  The space immediately after the
++# comma in the $(if ...) constructs is significant - do not remove it.
++cppflags += \
++  -DBASEVER="\"$(BASEVER)\"" \
++  -DDATESTAMP="\"$(if $(DEVPHASE), $(DATESTAMP))\"" \
++  -DDEVPHASE="\"$(if $(DEVPHASE), ($(DEVPHASE)))\"" \
++  -DPKGVERSION="\"$(pkgversion)\"" \
++  -DBUGURL="\"$(bugurl)\"" \
++  -DREVISION=
++
++# Include and link freshly built target RTL instead of the default.
++RTL_DIR := ../libada
++adaflags += -nostdinc -I$(RTL_DIR)/adainclude
++ldlibs   += -L$(RTL_DIR)/adalib -lgnat-$(LIB_VERSION)
++
++# Append user settings last, allowing them to take precedence.
++adaflags += $(CFLAGS) $(ADA_CFLAGS) $(ADAFLAGS)
++cflags   += $(CFLAGS) $(ADA_CFLAGS)
++cppflags += $(CPPFLAGS)
++ldflags  += $(LDFLAGS)
++
++# Link wanted Ada sources from source tree, so that gnat fails when new
++# dependencies are missing in the current directory, instead of silently
++# using the ones in the distant directory.
++# Let Make create all symlinks before first ada compilation,
++# because they depend on each other.
++# snames.ad[bs] is generated in the build tree.
++
++UNITS_BOTH := aspects atree casing csets debug einfo elists fname \
++  gnatvsn krunch lib namet nlists opt output repinfo scans sem_aux \
++  sinfo sinput stand stringt table tree_in tree_io types uintp \
++  uname urealp widechar xutil
++UNITS_SPEC := alloc hostparm rident
++SEPARATES := lib-list lib-sort
++ADA_SRC := $(addsuffix .ads, $(UNITS_BOTH) $(UNITS_SPEC)) \
++           $(addsuffix .adb, $(UNITS_BOTH) $(SEPARATES))
++OBJECTS := $(addsuffix .o, $(UNITS_BOTH) snames $(UNITS_SPEC) version)
++
++all: libgnatvsn.a libgnatvsn.so.$(LIB_VERSION) gnatvsn.gpr
++
++libgnatvsn.so.$(LIB_VERSION): $(addprefix obj-shared/,$(OBJECTS))
++	$(CC) -o $@ -shared -fPIC -Wl,--soname,$@ $^ $(ldflags) $(ldlibs)
++	ln -fs libgnatvsn.so.$(LIB_VERSION) libgnatvsn.so
++	chmod a=r obj-shared/*.ali
++# Make the .ali files, but not the .o files, visible to the gnat tools.
++	cp -lp obj-shared/*.ali .
++
++$(foreach u, $(UNITS_BOTH) snames, obj-shared/$(u).o): \
++obj-shared/%.o: %.adb $(ADA_SRC) snames.adb snames.ads | obj-shared
++	$(CC) -c -fPIC $(adaflags) $< -o $@
++
++$(foreach u, $(UNITS_SPEC), obj-shared/$(u).o): \
++obj-shared/%.o: %.ads $(ADA_SRC) snames.adb snames.ads | obj-shared
++	$(CC) -c -fPIC $(adaflags) $< -o $@
++
++obj-shared/version.o: version.c version.h | obj-shared
++	$(CC) -c -fPIC $(cflags) $(cppflags) $< -o $@
++
++libgnatvsn.a: $(addprefix obj-static/,$(OBJECTS))
++	ar rc $@ $^
++	ranlib $@
++
++$(foreach u, $(UNITS_BOTH) snames, obj-static/$(u).o): \
++obj-static/%.o: %.adb $(ADA_SRC) snames.adb snames.ads | obj-static
++	$(CC) -c $(adaflags) $< -o $@
++
++$(foreach u, $(UNITS_SPEC), obj-static/$(u).o): \
++obj-static/%.o: %.ads $(ADA_SRC) snames.adb snames.ads | obj-static
++	$(CC) -c $(adaflags) $< -o $@
++
++obj-static/version.o: version.c version.h | obj-static
++	$(CC) -c $(cflags) $(cppflags) $< -o $@
++
++obj-shared obj-static:
++	mkdir $@
++
++$(ADA_SRC):
++	ln -s $(srcdir)/../gcc/ada/$@
++version.c version.h:
++	ln -s $(srcdir)/../gcc/$@
++snames.adb snames.ads:
++	ln -s ../../gcc/ada/$@
++
++gnatvsn.gpr: $(srcdir)/gnatvsn.gpr.sed
++	sed '$(foreach v,src ali lib,s|$(v)_inst_dir|$($(v)_inst_dir)|;)' \
++	  $< > $@
++
++install: all
++	mkdir -p $(DESTDIR)$(gpr_inst_dir)
++	$(INSTALL_DATA) gnatvsn.gpr $(DESTDIR)$(gpr_inst_dir)
++	mkdir -p $(DESTDIR)$(lib_inst_dir)
++	$(INSTALL_DATA) libgnatvsn.a libgnatvsn.so.* $(DESTDIR)$(lib_inst_dir)
++	cd $(DESTDIR)$(lib_inst_dir) && ln -sf libgnatvsn.so.$(LIB_VERSION) libgnatvsn.so
++	mkdir -p $(DESTDIR)$(src_inst_dir)
++	$(INSTALL_DATA) *.adb *.ads *.c *.h $(DESTDIR)$(src_inst_dir)
++	mkdir -p $(DESTDIR)$(ali_inst_dir)
++	$(INSTALL) -m 0444 *.ali $(DESTDIR)$(ali_inst_dir)
++
++clean:
++	rm -fr obj-static obj-shared
++	rm -f *.ali libgnatvsn* *.adb *.ads *.c *.h gnatvsn.gpr
++	rm -f Makefile config.log
+--- a/src/Makefile.def
++++ b/src/Makefile.def
+@@ -185,6 +185,16 @@ target_modules = { module= libada; no_in
+ 		   missing= TAGS;
+ 		   missing= install-info;
+ 		   missing= installcheck; };
++target_modules = { module= libgnatvsn; no_check=true;
++		   missing= info;
++		   missing= dvi;
++		   missing= html;
++		   missing= pdf;
++		   missing= install-html;
++		   missing= install-pdf;
++		   missing= TAGS;
++		   missing= install-info;
++		   missing= installcheck; };
+ target_modules = { module= libgomp; bootstrap= true; lib_path=.libs; };
+ target_modules = { module= libitm; lib_path=.libs; };
+ target_modules = { module= libatomic; lib_path=.libs; };
+@@ -383,6 +393,8 @@ dependencies = { module=all-fixincludes;
+ dependencies = { module=all-target-libada; on=all-gcc; };
+ dependencies = { module=all-gnattools; on=all-target-libada; };
+ dependencies = { module=all-gnattools; on=all-target-libstdc++-v3; };
++dependencies = { module=all-gnattools; on=all-target-libgnatvsn; };
++dependencies = { module=all-target-libgnatvsn; on=all-target-libada; };
+ 
+ // Depending on the specific configuration, the LTO plugin will either use the
+ // generic libiberty build or the specific build for linker plugins.
+--- a/src/configure.ac
++++ b/src/configure.ac
+@@ -170,6 +170,7 @@ target_libraries="target-libgcc \
+ 		target-libobjc \
+ 		target-libada \
+ 		${target_libiberty} \
++		target-libgnatvsn \
+ 		target-libgo"
+ 
+ # these tools are built using the target libraries, and are intended to
+@@ -454,7 +455,7 @@ AC_ARG_ENABLE(libada,
+ ENABLE_LIBADA=$enableval,
+ ENABLE_LIBADA=yes)
+ if test "${ENABLE_LIBADA}" != "yes" ; then
+-  noconfigdirs="$noconfigdirs gnattools"
++  noconfigdirs="$noconfigdirs target-libgnatvsn gnattools"
+ fi
+ 
+ AC_ARG_ENABLE(libssp,
+--- a/src/gcc/ada/gcc-interface/config-lang.in
++++ b/src/gcc/ada/gcc-interface/config-lang.in
+@@ -34,7 +34,7 @@ gtfiles="\$(srcdir)/ada/gcc-interface/ad
+ 
+ outputs="ada/gcc-interface/Makefile ada/Makefile"
+ 
+-target_libs="target-libada"
++target_libs="target-libada target-libgnatvsn"
+ lang_dirs="libada gnattools"
+ 
+ # Ada is not enabled by default for the time being.
+--- a/src/gcc/testsuite/ada/acats/run_acats.sh
++++ b/src/gcc/testsuite/ada/acats/run_acats.sh
+@@ -32,6 +32,15 @@ ADA_INCLUDE_PATH=$BASE/ada/rts
+ LD_LIBRARY_PATH=$ADA_INCLUDE_PATH:$BASE:$LD_LIBRARY_PATH
+ ADA_OBJECTS_PATH=$ADA_INCLUDE_PATH
+ 
++target_gcc="$BASE/xgcc -B$BASE/"
++target=`$target_gcc -dumpmachine`
++vsn_lib_dir=$BASE/../$target/libgnatvsn
++LD_LIBRARY_PATH=$vsn_lib_dir:$LD_LIBRARY_PATH
++if [ ! -d $vsn_lib_dir ]; then
++   echo libgnatvsn not found in "$vsn_lib_dir", exiting.
++   exit 1
++fi
++
+ if [ ! -d $ADA_INCLUDE_PATH ]; then
+    echo gnatlib missing, exiting.
+    exit 1
+--- a/src/gcc/testsuite/lib/gnat.exp
++++ b/src/gcc/testsuite/lib/gnat.exp
+@@ -128,8 +128,10 @@ proc gnat_target_compile { source dest t
+ 	set gnat_target_current "[current_target_name]"
+ 	if [info exists TOOL_OPTIONS] {
+ 	    set rtsdir "[get_multilibs ${TOOL_OPTIONS}]/libada"
++	    set vsndir "[get_multilibs ${TOOL_OPTIONS}]/libgnatvsn"
+ 	} else {
+ 	    set rtsdir "[get_multilibs]/libada"
++	    set vsndir "[get_multilibs]/libgnatvsn"
+ 	}
+ 	if [info exists TOOL_EXECUTABLE] {
+ 	    set GNAT_UNDER_TEST "$TOOL_EXECUTABLE"
+@@ -140,14 +142,15 @@ proc gnat_target_compile { source dest t
+ 
+ 	# gnatlink looks for system.ads itself and has no --RTS option, so
+ 	# specify via environment
+-	setenv ADA_INCLUDE_PATH "$rtsdir/adainclude"
+-	setenv ADA_OBJECTS_PATH "$rtsdir/adainclude"
++	setenv ADA_INCLUDE_PATH "$rtsdir/adainclude:$vsndir"
++	setenv ADA_OBJECTS_PATH "$rtsdir/adainclude:$vsndir"
+ 	# Always log so compilations can be repeated manually.
+-	verbose -log "ADA_INCLUDE_PATH=$rtsdir/adainclude"
+-	verbose -log "ADA_OBJECTS_PATH=$rtsdir/adainclude"
++	verbose -log "ADA_INCLUDE_PATH=$rtsdir/adainclude:$vsndir"
++	verbose -log "ADA_OBJECTS_PATH=$rtsdir/adainclude:$vsndir"
+ 
+ 	if { ! [ string match "*/libada/adalib*" $ld_library_path ] } {
+ 	    append ld_library_path ":$rtsdir/adalib"
++	    append ld_library_path ":$vsndir"
+ 	    set_ld_library_path_env_vars
+ 	}
+     }

@@ -1,0 +1,33 @@
+From ffdf8c99838c350bd33132439234a9d5fd8193ef Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Tue, 3 Jan 2023 20:44:54 +0800
+Subject: [PATCH 20/28] LoongArch: show -mfpu status in the output of
+ "--help=target -Q"
+
+Change-Id: I416f46875fdb1c65290095c1087acea73d6697b8
+---
+ src/gcc/config/loongarch/loongarch-opts.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/gcc/config/loongarch/loongarch-opts.c b/src/gcc/config/loongarch/loongarch-opts.c
+index fb1d4ae41..d993636ec 100644
+--- a/src/gcc/config/loongarch/loongarch-opts.c
++++ b/src/gcc/config/loongarch/loongarch-opts.c
+@@ -715,11 +715,13 @@ loongarch_update_gcc_opt_status (struct gcc_options *opts,
+ 	gcc_unreachable ();
+     }
+ 
+-  /* status of -m*-float */
++  /* status of -m*-float and -mfpu */
+   opts->x_la_opt_switches &= ~OPTION_MASK_FORCE_SOFTF;
+   opts->x_la_opt_switches &= ~OPTION_MASK_FORCE_F32;
+   opts->x_la_opt_switches &= ~OPTION_MASK_FORCE_F64;
+ 
++  opts->x_la_opt_fpu = target->isa.fpu;
++
+   switch (target->isa.fpu)
+     {
+       case ISA_EXT_NOFPU:
+-- 
+2.31.1
+

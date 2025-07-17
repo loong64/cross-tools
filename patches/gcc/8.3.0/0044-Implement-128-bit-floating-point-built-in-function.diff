@@ -1,0 +1,140 @@
+From 993c61a8cc0de18ead9921ca6f3f5761e79b84af Mon Sep 17 00:00:00 2001
+From: chenxiaolong <chenxiaolong@loongson.cn>
+Date: Wed, 6 Sep 2023 18:01:56 +0800
+Subject: [PATCH 03/15] Implement 128-bit floating point built-in function
+
+Change-Id: Id968d6d8e16e2e963e79b964ee5aa30fcad88cb5
+---
+ src/gcc/config/loongarch/loongarch-builtins.c |  5 ++
+ src/gcc/config/loongarch/loongarch-c.c        | 10 +++
+ .../gcc.target/loongarch/math-float-128.c     | 81 +++++++++++++++++++
+ 3 files changed, 96 insertions(+)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/math-float-128.c
+
+diff --git a/src/gcc/config/loongarch/loongarch-builtins.c b/src/gcc/config/loongarch/loongarch-builtins.c
+index b326ec46c..8c89eb908 100644
+--- a/src/gcc/config/loongarch/loongarch-builtins.c
++++ b/src/gcc/config/loongarch/loongarch-builtins.c
+@@ -2463,6 +2463,11 @@ loongarch_init_builtins (void)
+   unsigned int i;
+   tree type;
+ 
++  /* Register the type long_double_type_node as a built-in type and
++     give it an alias "__float128".  */
++  (*lang_hooks.types.register_builtin_type) (long_double_type_node,
++                                           "__float128");
++
+   /* Iterate through all of the bdesc arrays, initializing all of the
+      builtin functions.  */
+   for (i = 0; i < ARRAY_SIZE (loongarch_builtins); i++)
+diff --git a/src/gcc/config/loongarch/loongarch-c.c b/src/gcc/config/loongarch/loongarch-c.c
+index f8583f7aa..a9e909157 100644
+--- a/src/gcc/config/loongarch/loongarch-c.c
++++ b/src/gcc/config/loongarch/loongarch-c.c
+@@ -116,6 +116,16 @@ loongarch_cpu_cpp_builtins (cpp_reader *pfile)
+       builtin_define ("__loongarch_simd_width=256");
+     }
+ 
++  /* Add support for FLOAT128_TYPE on the LoongArch architecture.  */
++  builtin_define ("__FLOAT128_TYPE__");
++
++  /* Map the old _Float128 'q' builtins into the new 'f128' builtins.  */
++  builtin_define ("__builtin_fabsq=__builtin_fabsf128");
++  builtin_define ("__builtin_copysignq=__builtin_copysignf128");
++  builtin_define ("__builtin_nanq=__builtin_nanf128");
++  builtin_define ("__builtin_nansq=__builtin_nansf128");
++  builtin_define ("__builtin_infq=__builtin_inff128");
++  builtin_define ("__builtin_huge_valq=__builtin_huge_valf128");
+ 
+   /* Native Data Sizes.  */
+   builtin_define_with_int_value ("_LOONGARCH_SZINT", INT_TYPE_SIZE);
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/math-float-128.c b/src/gcc/testsuite/gcc.target/loongarch/math-float-128.c
+new file mode 100644
+index 000000000..387566a57
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/math-float-128.c
+@@ -0,0 +1,81 @@
++/* { dg-do compile } */
++/* { dg-options " -march=loongarch64 -O2 " } */
++/* { dg-final { scan-assembler-not "my_fabsq2:.*\\bl\t%plt\\(__builtin_fabsq\\).*my_fabsq2" } } */
++/* { dg-final { scan-assembler-not "my_copysignq2:.*\\bl\t%plt\\(__builtin_copysignq\\).*my_copysignq2" } } */
++/* { dg-final { scan-assembler-not "my_infq2:.*\\bl\t%plt\\(__builtin_infq\\).*my_infq2" } } */
++/* { dg-final { scan-assembler-not "my_huge_valq2:.*\\bl\t%plt\\(__builtin_huge_valq\\).*my_huge_valq2" } } */
++/* { dg-final { scan-assembler-not "my_nanq2:.*\\bl\t%plt\\(__builtin_nanq\\).*my_nanq2" } } */
++/* { dg-final { scan-assembler-not "my_nansq2:.*\\bl\t%plt\\(__builtin_nansq\\).*my_nansq2" } } */
++
++__float128
++my_fabsq1 (__float128 a)
++{
++  return __builtin_fabsq (a);
++}
++
++_Float128
++my_fabsq2 (_Float128 a)
++{
++  return __builtin_fabsq (a);
++}
++
++__float128
++my_copysignq1 (__float128 a, __float128 b)
++{
++  return __builtin_copysignq (a, b);
++}
++
++_Float128
++my_copysignq2 (_Float128 a, _Float128 b)
++{
++  return __builtin_copysignq (a, b);
++}
++
++__float128
++my_infq1 (void)
++{
++  return __builtin_infq ();
++}
++
++_Float128
++my_infq2 (void)
++{
++  return __builtin_infq ();
++}
++
++__float128
++my_huge_valq1 (void)
++{
++  return __builtin_huge_valq ();
++}
++
++_Float128
++my_huge_valq2 (void)
++{
++  return __builtin_huge_valq ();
++}
++
++__float128
++my_nanq1 (void)
++{
++  return __builtin_nanq ("");
++}
++
++_Float128
++my_nanq2 (void)
++{
++  return __builtin_nanq ("");
++}
++
++__float128
++my_nansq1 (void)
++{
++  return __builtin_nansq ("");
++}
++
++_Float128
++my_nansq2 (void)
++{
++  return __builtin_nansq ("");
++}
++
+-- 
+2.39.3
+

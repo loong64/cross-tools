@@ -1,0 +1,34 @@
+From fff3f28f8fe57600e306148a14bf9b2c834c353a Mon Sep 17 00:00:00 2001
+From: Guo Jie <guojie@loongson.cn>
+Date: Sun, 25 Jun 2023 13:16:23 +0800
+Subject: [PATCH 02/13] Fix accuracy when using -mrecip=div, which leads to
+ Spec2017-538 compare error.
+
+Change-Id: I3286bd507ea9a1a171956890979cd08e4b6685ff
+---
+ src/gcc/config/loongarch/loongarch.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index fe55c4dd9..69043f363 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -10706,11 +10706,11 @@ void loongarch_emit_swdivsf (rtx res, rtx a, rtx b, machine_mode mode)
+   /* 2.0 - b * x0; */
+   emit_insn (gen_rtx_SET (e0, gen_rtx_FMA (mode,gen_rtx_NEG(mode, b), x0, mtwo)));
+ 
+-  /* x1 = x0 * e0 */
+-  emit_insn (gen_rtx_SET (x1, gen_rtx_MULT (mode, x0, e0)));
++  /* x1 = a * x0 */
++  emit_insn (gen_rtx_SET (x1, gen_rtx_MULT (mode, a, x0)));
+ 
+-  /* res = a * x1 */
+-  emit_insn (gen_rtx_SET (res, gen_rtx_MULT (mode, a, x1)));
++  /* res = e0 * x1 */
++  emit_insn (gen_rtx_SET (res, gen_rtx_MULT (mode, e0, x1)));
+ }
+ 
+ /* LoongArch only implements preld hint=0 (prefetch for load) and hint=8
+-- 
+2.31.1
+

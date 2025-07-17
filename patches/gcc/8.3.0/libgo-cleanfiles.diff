@@ -1,0 +1,30 @@
+Index: b/src/libgo/Makefile.am
+===================================================================
+--- a/src/libgo/Makefile.am
++++ b/src/libgo/Makefile.am
+@@ -1570,7 +1570,9 @@ mostlyclean-local:
+ 	find . -name '*-testsum' -print | xargs rm -f
+ 	find . -name '*-testlog' -print | xargs rm -f
+ 
+-CLEANFILES = *.go *.c s-* libgo.sum libgo.log runtime.inc
++CLEANFILES = *.go *.c s-* libgo.sum libgo.log runtime.inc \
++	*.dep */*.dep */*/*.dep */*/*/*.dep */*/*.dep */*/*/*/*.dep \
++	*/*/*/*/*/*.dep
+ 
+ clean-local:
+ 	find . -name '*.la' -print | xargs $(LIBTOOL) --mode=clean rm -f
+Index: b/src/libgo/Makefile.in
+===================================================================
+--- a/src/libgo/Makefile.in
++++ b/src/libgo/Makefile.in
+@@ -1417,7 +1417,9 @@ MOSTLYCLEANFILES = \
+ 	libgo.head libgo.sum.sep libgo.log.sep libgo.var \
+ 	libcalls-list runtime.inc runtime.inc.tmp2 runtime.inc.tmp3
+ 
+-CLEANFILES = *.go *.c s-* libgo.sum libgo.log runtime.inc
++CLEANFILES = *.go *.c s-* libgo.sum libgo.log runtime.inc \
++	*.dep */*.dep */*/*.dep */*/*/*.dep */*/*.dep */*/*/*/*.dep \
++	*/*/*/*/*/*.dep
+ all: config.h
+ 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
+ 

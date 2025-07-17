@@ -1,0 +1,112 @@
+# DP: This implements D language support in the GCC back end, and adds
+# DP: relevant documentation about the GDC front end (documentation part).
+
+--- a/src/gcc/doc/frontends.texi
++++ b/src/gcc/doc/frontends.texi
+@@ -9,6 +9,7 @@
+ @cindex GNU Compiler Collection
+ @cindex GNU C Compiler
+ @cindex Ada
++@cindex D
+ @cindex Fortran
+ @cindex Go
+ @cindex Objective-C
+@@ -16,7 +17,7 @@
+ GCC stands for ``GNU Compiler Collection''.  GCC is an integrated
+ distribution of compilers for several major programming languages.  These
+ languages currently include C, C++, Objective-C, Objective-C++,
+-Fortran, Ada, Go, and BRIG (HSAIL).
++Fortran, Ada, D, Go, and BRIG (HSAIL).
+ 
+ The abbreviation @dfn{GCC} has multiple meanings in common use.  The
+ current official meaning is ``GNU Compiler Collection'', which refers
+--- a/src/gcc/doc/install.texi
++++ b/src/gcc/doc/install.texi
+@@ -916,7 +916,7 @@ only for the listed packages.  For other packages, only static libraries
+ will be built.  Package names currently recognized in the GCC tree are
+ @samp{libgcc} (also known as @samp{gcc}), @samp{libstdc++} (not
+ @samp{libstdc++-v3}), @samp{libffi}, @samp{zlib}, @samp{boehm-gc},
+-@samp{ada}, @samp{libada}, @samp{libgo}, and @samp{libobjc}.
++@samp{ada}, @samp{libada}, @samp{libgo}, @samp{libobjc}, and @samp{libphobos}.
+ Note @samp{libiberty} does not support shared libraries at all.
+ 
+ Use @option{--disable-shared} to build only static libraries.  Note that
+@@ -1601,12 +1601,12 @@ their runtime libraries should be built.  For a list of valid values for
+ grep ^language= */config-lang.in
+ @end smallexample
+ Currently, you can use any of the following:
+-@code{all}, @code{default}, @code{ada}, @code{c}, @code{c++}, @code{fortran},
+-@code{go}, @code{jit}, @code{lto}, @code{objc}, @code{obj-c++}.
++@code{all}, @code{default}, @code{ada}, @code{c}, @code{c++}, @code{d},
++@code{fortran}, @code{go}, @code{jit}, @code{lto}, @code{objc}, @code{obj-c++}.
+ Building the Ada compiler has special requirements, see below.
+ If you do not pass this flag, or specify the option @code{default}, then the
+ default languages available in the @file{gcc} sub-tree will be configured.
+-Ada, Go, Jit, and Objective-C++ are not default languages.  LTO is not a
++Ada, D, Go, Jit, and Objective-C++ are not default languages.  LTO is not a
+ default language, but is built by default because @option{--enable-lto} is
+ enabled by default.  The other languages are default languages.  If
+ @code{all} is specified, then all available languages are built.  An
+@@ -2699,7 +2699,7 @@ on a simulator as described at @uref{http://gcc.gnu.org/simtest-howto.html}.
+ 
+ In order to run sets of tests selectively, there are targets
+ @samp{make check-gcc} and language specific @samp{make check-c},
+-@samp{make check-c++}, @samp{make check-fortran},
++@samp{make check-c++}, @samp{make check-d} @samp{make check-fortran},
+ @samp{make check-ada}, @samp{make check-objc}, @samp{make check-obj-c++},
+ @samp{make check-lto}
+ in the @file{gcc} subdirectory of the object directory.  You can also
+--- a/src/gcc/doc/invoke.texi
++++ b/src/gcc/doc/invoke.texi
+@@ -1354,6 +1354,15 @@ Go source code.
+ @item @var{file}.brig
+ BRIG files (binary representation of HSAIL).
+ 
++@item @var{file}.d
++D source code.
++
++@item @var{file}.di
++D interface file.
++
++@item @var{file}.dd
++D documentation code (Ddoc).
++
+ @item @var{file}.ads
+ Ada source code file that contains a library unit declaration (a
+ declaration of a package, subprogram, or generic, or a generic
+@@ -1400,6 +1409,7 @@ objective-c  objective-c-header  objective-c-cpp-output
+ objective-c++ objective-c++-header objective-c++-cpp-output
+ assembler  assembler-with-cpp
+ ada
++d
+ f77  f77-cpp-input f95  f95-cpp-input
+ go
+ brig
+--- a/src/gcc/doc/sourcebuild.texi
++++ b/src/gcc/doc/sourcebuild.texi
+@@ -106,6 +106,10 @@ The Objective-C and Objective-C++ runtime library.
+ @item libquadmath
+ The runtime support library for quad-precision math operations.
+ 
++@item libphobos
++The D standard and runtime library.  The bulk of this library is mirrored
++from the @uref{https://github.com/@/dlang, master D repositories}.
++
+ @item libssp
+ The Stack protector runtime library.
+ 
+--- a/src/gcc/doc/standards.texi
++++ b/src/gcc/doc/standards.texi
+@@ -313,6 +313,12 @@ capability is typically utilized to implement the HSA runtime API's HSAIL
+ finalization extension for a gcc supported processor. HSA standards are
+ freely available at @uref{http://www.hsafoundation.com/standards/}.
+ 
++@section D language
++
++GCC supports the D 2.0 programming language.  The D language itself is
++currently defined by its reference implementation and supporting language
++specification, described at @uref{https://dlang.org/spec/spec.html}.
++
+ @section References for Other Languages
+ 
+ @xref{Top, GNAT Reference Manual, About This Guide, gnat_rm,

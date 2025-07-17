@@ -1,0 +1,82 @@
+From 83e894b8f8cb41f026fbe870cc4119b71fb1a1c9 Mon Sep 17 00:00:00 2001
+From: Jiahao Xu <xujiahao@loongson.cn>
+Date: Fri, 4 Aug 2023 17:16:01 +0800
+Subject: [PATCH 10/13] gcc-8.3.0: Fix bug when using -mrecip=rsqrt, which
+ casues an internal compiler error.
+
+Change-Id: I319f3d3df6929432f811da4d188c21eeea42beba
+---
+ src/gcc/config/loongarch/lasx.md      | 4 ++--
+ src/gcc/config/loongarch/loongarch.md | 4 ++--
+ src/gcc/config/loongarch/lsx.md       | 4 ++--
+ 3 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index 6f191194d..edd6e3204 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -1643,7 +1643,7 @@
+   [(set (match_operand:FLASX 0 "register_operand" "=f")
+     (unspec:FLASX [(match_operand:FLASX 1 "register_operand" "f")]
+              UNSPEC_RECIPE))]
+-  "ISA_HAS_LASX && flag_unsafe_math_optimizations && TARGET_RECIP_VEC_DIV"
++  "ISA_HAS_LASX && flag_unsafe_math_optimizations"
+   "xvfrecipe.<flasxfmt>\t%u0,%u1"
+   [(set_attr "type" "simd_fdiv")
+    (set_attr "mode" "<MODE>")])
+@@ -1671,7 +1671,7 @@
+   [(set (match_operand:FLASX 0 "register_operand" "=f")
+     (unspec:FLASX [(match_operand:FLASX 1 "register_operand" "f")]
+              UNSPEC_RSQRTE))]
+-  "ISA_HAS_LASX && flag_unsafe_math_optimizations && TARGET_RECIP_VEC_RSQRT"
++  "ISA_HAS_LASX && flag_unsafe_math_optimizations"
+   "xvfrsqrte.<flasxfmt>\t%u0,%u1"
+   [(set_attr "type" "simd_fdiv")
+    (set_attr "mode" "<MODE>")])
+diff --git a/src/gcc/config/loongarch/loongarch.md b/src/gcc/config/loongarch/loongarch.md
+index 6770f0b8f..4e02660d3 100644
+--- a/src/gcc/config/loongarch/loongarch.md
++++ b/src/gcc/config/loongarch/loongarch.md
+@@ -875,7 +875,7 @@
+   [(set (match_operand:ANYF 0 "register_operand" "=f")
+     (unspec:ANYF [(match_operand:ANYF 1 "register_operand" "f")]
+               UNSPEC_RECIPE))]
+-  "TARGET_HARD_FLOAT && flag_unsafe_math_optimizations && TARGET_RECIP_DIV"
++  "TARGET_HARD_FLOAT && flag_unsafe_math_optimizations"
+   "frecipe.<fmt>\t%0,%1"
+   [(set_attr "type" "frsqrte")
+    (set_attr "mode" "<UNITMODE>")
+@@ -1099,7 +1099,7 @@
+   [(set (match_operand:ANYF 0 "register_operand" "=f")
+     (unspec:ANYF [(match_operand:ANYF 1 "register_operand" "f")]
+               UNSPEC_RSQRTE))]
+-  "TARGET_HARD_FLOAT && flag_unsafe_math_optimizations && TARGET_RECIP_SQRT"
++  "TARGET_HARD_FLOAT && flag_unsafe_math_optimizations"
+   "frsqrte.<fmt>\t%0,%1"
+   [(set_attr "type" "frsqrte")
+    (set_attr "mode" "<UNITMODE>")])
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index 69d12fd55..a6962b271 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -1532,7 +1532,7 @@
+   [(set (match_operand:FLSX 0 "register_operand" "=f")
+     (unspec:FLSX [(match_operand:FLSX 1 "register_operand" "f")]
+              UNSPEC_RECIPE))]
+-  "ISA_HAS_LSX && flag_unsafe_math_optimizations && TARGET_RECIP_VEC_DIV"
++  "ISA_HAS_LSX && flag_unsafe_math_optimizations"
+   "vfrecipe.<flsxfmt>\t%w0,%w1"
+   [(set_attr "type" "simd_fdiv")
+    (set_attr "mode" "<MODE>")])
+@@ -1559,7 +1559,7 @@
+   [(set (match_operand:FLSX 0 "register_operand" "=f")
+     (unspec:FLSX [(match_operand:FLSX 1 "register_operand" "f")]
+              UNSPEC_RSQRTE))]
+-  "ISA_HAS_LSX && flag_unsafe_math_optimizations && TARGET_RECIP_VEC_SQRT"
++  "ISA_HAS_LSX && flag_unsafe_math_optimizations"
+   "vfrsqrte.<flsxfmt>\t%w0,%w1"
+   [(set_attr "type" "simd_fdiv")
+    (set_attr "mode" "<MODE>")])
+-- 
+2.31.1
+

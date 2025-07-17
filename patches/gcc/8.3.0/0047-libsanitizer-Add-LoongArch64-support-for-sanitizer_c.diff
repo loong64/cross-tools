@@ -1,0 +1,791 @@
+From 71833f6803891388ffa4d65fdfd9aa9329d2387e Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Mon, 11 Dec 2023 16:41:40 +0800
+Subject: [PATCH 06/15] libsanitizer: Add LoongArch64 support for
+ sanitizer_common.
+
+Change-Id: I99cc04174f8b27741c2de56731951af80d2b7a24
+---
+ .../sanitizer_common/sanitizer_common.h       |   5 +-
+ .../sanitizer_common_syscalls.inc             |   6 +-
+ .../sanitizer_common/sanitizer_linux.cc       |  77 +++++++-
+ .../sanitizer_common/sanitizer_linux.h        |   2 +-
+ .../sanitizer_linux_libcdep.cc                |  19 +-
+ .../sanitizer_common/sanitizer_platform.h     |  12 +-
+ .../sanitizer_platform_interceptors.h         |   9 +-
+ .../sanitizer_platform_limits_linux.cc        |   2 +-
+ .../sanitizer_platform_limits_posix.cc        |  15 +-
+ .../sanitizer_platform_limits_posix.h         |  24 ++-
+ .../sanitizer_common/sanitizer_stacktrace.cc  |  11 +-
+ .../sanitizer_stoptheworld_linux_libcdep.cc   |   9 +-
+ .../sanitizer_symbolizer_libcdep.cc           |   3 +
+ .../sanitizer_syscall_linux_loongarch64.inc   | 171 ++++++++++++++++++
+ src/libsanitizer/ubsan/ubsan_platform.h       |   2 +-
+ 15 files changed, 340 insertions(+), 27 deletions(-)
+ create mode 100644 src/libsanitizer/sanitizer_common/sanitizer_syscall_linux_loongarch64.inc
+
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_common.h b/src/libsanitizer/sanitizer_common/sanitizer_common.h
+index dd207d72e..55d8b3775 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_common.h
++++ b/src/libsanitizer/sanitizer_common/sanitizer_common.h
+@@ -629,7 +629,8 @@ enum ModuleArch {
+   kModuleArchARMV7,
+   kModuleArchARMV7S,
+   kModuleArchARMV7K,
+-  kModuleArchARM64
++  kModuleArchARM64,
++  kModuleArchLoongArch64
+ };
+ 
+ // When adding a new architecture, don't forget to also update
+@@ -654,6 +655,8 @@ inline const char *ModuleArchToString(ModuleArch arch) {
+       return "armv7k";
+     case kModuleArchARM64:
+       return "arm64";
++    case kModuleArchLoongArch64:
++      return "loongarch64";
+   }
+   CHECK(0 && "Invalid module arch");
+   return "";
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_common_syscalls.inc b/src/libsanitizer/sanitizer_common/sanitizer_common_syscalls.inc
+index 6fd5ef742..ed24fb4f0 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_common_syscalls.inc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_common_syscalls.inc
+@@ -2295,7 +2295,8 @@ POST_SYSCALL(ni_syscall)(long res) {}
+ PRE_SYSCALL(ptrace)(long request, long pid, long addr, long data) {
+ #if !SANITIZER_ANDROID && \
+     (defined(__i386) || defined(__x86_64) || defined(__mips64) || \
+-     defined(__powerpc64__) || defined(__aarch64__) || defined(__s390__))
++     defined(__powerpc64__) || defined(__aarch64__) || defined(__s390__) || \
++     SANITIZER_LOONGARCH64)
+   if (data) {
+     if (request == ptrace_setregs) {
+       PRE_READ((void *)data, struct_user_regs_struct_sz);
+@@ -2316,7 +2317,8 @@ PRE_SYSCALL(ptrace)(long request, long pid, long addr, long data) {
+ POST_SYSCALL(ptrace)(long res, long request, long pid, long addr, long data) {
+ #if !SANITIZER_ANDROID && \
+     (defined(__i386) || defined(__x86_64) || defined(__mips64) || \
+-     defined(__powerpc64__) || defined(__aarch64__) || defined(__s390__))
++     defined(__powerpc64__) || defined(__aarch64__) || defined(__s390__) || \
++     SANITIZER_LOONGARCH64)
+   if (res >= 0 && data) {
+     // Note that this is different from the interceptor in
+     // sanitizer_common_interceptors.inc.
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_linux.cc b/src/libsanitizer/sanitizer_common/sanitizer_linux.cc
+index 2826cc89e..18faac3f8 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_linux.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_linux.cc
+@@ -45,6 +45,14 @@
+ #undef stat
+ #endif
+ 
++#if SANITIZER_LOONGARCH64
++#define __ARCH_WANT_RENAMEAT
++// From <asm/sigcontext.h>, these bits marks whether the current
++// instruction reads/writes memory.
++#define ADRERR_RD (1 << 30)
++#define ADRERR_WR (1 << 31)
++#endif
++
+ #include <dlfcn.h>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -148,6 +156,8 @@ namespace __sanitizer {
+ #include "sanitizer_syscall_linux_x86_64.inc"
+ #elif SANITIZER_LINUX && defined(__aarch64__)
+ #include "sanitizer_syscall_linux_aarch64.inc"
++#elif SANITIZER_LINUX && SANITIZER_LOONGARCH64
++#include "sanitizer_syscall_linux_loongarch64.inc"
+ #else
+ #include "sanitizer_syscall_generic.inc"
+ #endif
+@@ -670,7 +680,10 @@ struct linux_dirent {
+   unsigned long      d_off;
+ #endif
+   unsigned short     d_reclen;
+-#ifdef __aarch64__
++#if defined(__aarch64__) || SANITIZER_LOONGARCH64
++  // LoongArch old-world also has this field, and missing it
++  // causes quite tricky failure in ThreadLister, which
++  // reads /proc/<tid>/tasks to get a list of user threads.
+   unsigned char      d_type;
+ #endif
+   char               d_name[256];
+@@ -766,6 +779,7 @@ int internal_sigaction_norestorer(int signum, const void *act, void *oldact) {
+     k_act.sigaction = u_act->sigaction;
+     internal_memcpy(&k_act.sa_mask, &u_act->sa_mask,
+                     sizeof(__sanitizer_kernel_sigset_t));
++
+     // Without SA_RESTORER kernel ignores the calls (probably returns EINVAL).
+     k_act.sa_flags = u_act->sa_flags | SA_RESTORER;
+     // FIXME: most often sa_restorer is unset, however the kernel requires it
+@@ -969,7 +983,7 @@ uptr GetMaxVirtualAddress() {
+ #if SANITIZER_NETBSD && defined(__x86_64__)
+   return 0x7f7ffffff000ULL;  // (0x00007f8000000000 - PAGE_SIZE)
+ #elif SANITIZER_WORDSIZE == 64
+-# if defined(__powerpc64__) || defined(__aarch64__)
++# if defined(__powerpc64__) || defined(__aarch64__) || SANITIZER_LOONGARCH64
+   // On PowerPC64 we have two different address space layouts: 44- and 46-bit.
+   // We somehow need to figure out which one we are using now and choose
+   // one of 0x00000fffffffffffUL and 0x00003fffffffffffUL.
+@@ -977,6 +991,7 @@ uptr GetMaxVirtualAddress() {
+   // of the address space, so simply checking the stack address is not enough.
+   // This should (does) work for both PowerPC64 Endian modes.
+   // Similarly, aarch64 has multiple address space layouts: 39, 42 and 47-bit.
++  // loongarch64 also has multiple address space layouts: default is 47-bit
+   return (1ULL << (MostSignificantSetBitIndex(GET_CURRENT_FRAME()) + 1)) - 1;
+ # elif defined(__mips64)
+   return (1ULL << 40) - 1;  // 0x000000ffffffffffUL;
+@@ -1538,6 +1553,47 @@ uptr internal_clone(int (*fn)(void *), void *child_stack, int flags, void *arg,
+                        : "memory");
+   return res;
+ }
++#elif SANITIZER_LOONGARCH64
++uptr internal_clone(int (*fn)(void *), void *child_stack, int flags, void *arg,
++                    int *parent_tidptr, void *newtls, int *child_tidptr) {
++  if (!fn || !child_stack)
++    return -EINVAL;
++
++  CHECK_EQ(0, (uptr)child_stack % 16);
++
++  register int res __asm__("$a0");
++  register int __flags __asm__("$a0") = flags;
++  register void *__stack __asm__("$a1") = child_stack;
++  register int *__ptid __asm__("$a2") = parent_tidptr;
++  register int *__ctid __asm__("$a3") = child_tidptr;
++  register void *__tls __asm__("$a4") = newtls;
++  register int (*__fn)(void *) __asm__("$a5") = fn;
++  register void *__arg __asm__("$a6") = arg;
++  register int nr_clone __asm__("$a7") = __NR_clone;
++
++  __asm__ __volatile__(
++      "syscall 0\n"
++
++      // if ($a0 != 0)
++      //   return $a0;
++      "bnez $a0, 1f\n"
++
++      // In the child, now. Call "fn(arg)".
++      "move $a0, $a6\n"
++      "jirl $ra, $a5, 0\n"
++
++      // Call _exit($a0).
++      "addi.d $a7, $zero, %9\n"
++      "syscall 0\n"
++
++      "1:\n"
++
++      : "=r"(res)
++      : "0"(__flags), "r"(__stack), "r"(__ptid), "r"(__ctid), "r"(__tls),
++        "r"(__fn), "r"(__arg), "r"(nr_clone), "i"(__NR_exit)
++      : "memory", "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7", "$t8");
++  return res;
++}
+ #endif  // defined(__x86_64__) && SANITIZER_LINUX
+ 
+ #if SANITIZER_ANDROID
+@@ -1655,6 +1711,10 @@ static bool Aarch64GetESR(ucontext_t *ucontext, u64 *esr) {
+ }
+ #endif
+ 
++// Tell if the offending instruction has memory read or write semantics.
++// Some arch in the future does it by reading the instruction code itself,
++// while LoongArch kernel offser 2 bits for this info in the struct sigcontext.
++
+ SignalContext::WriteFlag SignalContext::GetWriteFlag() const {
+   ucontext_t *ucontext = (ucontext_t *)context;
+ #if defined(__x86_64__) || defined(__i386__)
+@@ -1676,6 +1736,13 @@ SignalContext::WriteFlag SignalContext::GetWriteFlag() const {
+   u64 esr;
+   if (!Aarch64GetESR(ucontext, &esr)) return UNKNOWN;
+   return esr & ESR_ELx_WNR ? WRITE : READ;
++#elif SANITIZER_LOONGARCH64
++  u32 flags = ucontext->uc_mcontext.__flags;
++  if (flags & ADRERR_RD)
++    return READ;
++  if (flags & ADRERR_WR)
++    return WRITE;
++  return UNKNOWN;
+ #else
+   (void)ucontext;
+   return UNKNOWN;  // FIXME: Implement.
+@@ -1772,6 +1839,11 @@ static void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
+ # endif
+   *bp = ucontext->uc_mcontext.gregs[11];
+   *sp = ucontext->uc_mcontext.gregs[15];
++#elif SANITIZER_LOONGARCH64
++  ucontext_t *ucontext = (ucontext_t*)context;
++  *pc = ucontext->uc_mcontext.__pc;
++  *bp = ucontext->uc_mcontext.__gregs[22];
++  *sp = ucontext->uc_mcontext.__gregs[3];
+ #else
+ # error "Unsupported arch"
+ #endif
+@@ -1835,5 +1907,4 @@ bool GetRandom(void *buffer, uptr length, bool blocking) {
+ }
+ 
+ } // namespace __sanitizer
+-
+ #endif  // SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_NETBSD
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_linux.h b/src/libsanitizer/sanitizer_common/sanitizer_linux.h
+index 910703d8b..a00f86693 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_linux.h
++++ b/src/libsanitizer/sanitizer_common/sanitizer_linux.h
+@@ -59,7 +59,7 @@ int internal_sigaction_syscall(int signum, const void *act, void *oldact);
+ void internal_sigdelset(__sanitizer_sigset_t *set, int signum);
+ #if defined(__x86_64__) || defined(__mips__) || defined(__aarch64__) \
+   || defined(__powerpc64__) || defined(__s390__) || defined(__i386__) \
+-  || defined(__arm__)
++  || defined(__arm__) || SANITIZER_LOONGARCH64
+ uptr internal_clone(int (*fn)(void *), void *child_stack, int flags, void *arg,
+                     int *parent_tidptr, void *newtls, int *child_tidptr);
+ #endif
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_linux_libcdep.cc b/src/libsanitizer/sanitizer_common/sanitizer_linux_libcdep.cc
+index 3b1a2174c..29dfa1f18 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_linux_libcdep.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_linux_libcdep.cc
+@@ -196,7 +196,8 @@ void InitTlsSize() { }
+ 
+ #if (defined(__x86_64__) || defined(__i386__) || defined(__mips__) \
+     || defined(__aarch64__) || defined(__powerpc64__) || defined(__s390__) \
+-    || defined(__arm__)) && SANITIZER_LINUX && !SANITIZER_ANDROID
++    || defined(__arm__) || defined(__loongarch__)) && SANITIZER_LINUX \
++    && !SANITIZER_ANDROID
+ // sizeof(struct pthread) from glibc.
+ static atomic_uintptr_t kThreadDescriptorSize;
+ 
+@@ -263,6 +264,9 @@ uptr ThreadDescriptorSize() {
+ #elif defined(__s390__)
+   val = FIRST_32_SECOND_64(1152, 1776); // valid for glibc 2.22
+   atomic_store(&kThreadDescriptorSize, val, memory_order_relaxed);
++#elif SANITIZER_LOONGARCH64
++  val = 1792; // valid for GLIBC 2.28.
++  atomic_store(&kThreadDescriptorSize, val, memory_order_relaxed);
+ #endif
+   return 0;
+ }
+@@ -274,7 +278,7 @@ uptr ThreadSelfOffset() {
+   return kThreadSelfOffset;
+ }
+ 
+-#if defined(__mips__) || defined(__powerpc64__)
++#if defined(__mips__) || defined(__powerpc64__) || SANITIZER_LOONGARCH64
+ // TlsPreTcbSize includes size of struct pthread_descr and size of tcb
+ // head structure. It lies before the static tls blocks.
+ static uptr TlsPreTcbSize() {
+@@ -282,6 +286,8 @@ static uptr TlsPreTcbSize() {
+   const uptr kTcbHead = 16; // sizeof (tcbhead_t)
+ # elif defined(__powerpc64__)
+   const uptr kTcbHead = 88; // sizeof (tcbhead_t)
++# elif SANITIZER_LOONGARCH64
++  const uptr kTcbHead = 16; // sizeof (tcbhead_t)
+ # endif
+   const uptr kTlsAlign = 16;
+   const uptr kTlsPreTcbSize =
+@@ -322,12 +328,15 @@ uptr ThreadSelf() {
+   uptr thread_pointer;
+   asm("addi %0,13,%1" : "=r"(thread_pointer) : "I"(-kTlsTcbOffset));
+   descr_addr = thread_pointer - TlsPreTcbSize();
++# elif SANITIZER_LOONGARCH64
++  descr_addr = reinterpret_cast<uptr>(__builtin_thread_pointer()) -
++                                      ThreadDescriptorSize();
+ # else
+ #  error "unsupported CPU arch"
+ # endif
+   return descr_addr;
+ }
+-#endif  // (x86_64 || i386 || MIPS) && SANITIZER_LINUX
++#endif  // (x86_64 || i386 || MIPS || LoongArch) && SANITIZER_LINUX
+ 
+ #if SANITIZER_FREEBSD
+ static void **ThreadSelfSegbase() {
+@@ -360,7 +369,7 @@ static void GetTls(uptr *addr, uptr *size) {
+   *addr -= *size;
+   *addr += ThreadDescriptorSize();
+ # elif defined(__mips__) || defined(__aarch64__) || defined(__powerpc64__) \
+-    || defined(__arm__)
++    || defined(__arm__) || defined(__loongarch__)
+   *addr = ThreadSelf();
+   *size = GetTlsSize();
+ # else
+@@ -397,6 +406,8 @@ uptr GetTlsSize() {
+   return size;
+ #elif defined(__mips__) || defined(__powerpc64__)
+   return RoundUpTo(g_tls_size + TlsPreTcbSize(), 16);
++#elif defined(__loongarch__)
++  return g_tls_size + ThreadDescriptorSize();
+ #else
+   return g_tls_size;
+ #endif
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_platform.h b/src/libsanitizer/sanitizer_common/sanitizer_platform.h
+index 1eb4d0c61..59198076a 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_platform.h
++++ b/src/libsanitizer/sanitizer_common/sanitizer_platform.h
+@@ -140,6 +140,12 @@
+ # define SANITIZER_S390_64 0
+ #endif
+ 
++#if defined(__loongarch_lp64)
++#  define SANITIZER_LOONGARCH64 1
++#else
++#  define SANITIZER_LOONGARCH64 0
++#endif
++
+ #if defined(__powerpc__)
+ # define SANITIZER_PPC 1
+ # if defined(__powerpc64__)
+@@ -187,7 +193,7 @@
+ #ifndef SANITIZER_CAN_USE_ALLOCATOR64
+ # if (SANITIZER_ANDROID && defined(__aarch64__)) || SANITIZER_FUCHSIA
+ #  define SANITIZER_CAN_USE_ALLOCATOR64 1
+-# elif defined(__mips64) || defined(__aarch64__)
++# elif defined(__mips64) || defined(__aarch64__) || SANITIZER_LOONGARCH64
+ #  define SANITIZER_CAN_USE_ALLOCATOR64 0
+ # else
+ #  define SANITIZER_CAN_USE_ALLOCATOR64 (SANITIZER_WORDSIZE == 64)
+@@ -201,6 +207,8 @@
+ # define SANITIZER_MMAP_RANGE_SIZE FIRST_32_SECOND_64(1ULL << 32, 1ULL << 40)
+ #elif defined(__aarch64__)
+ # define SANITIZER_MMAP_RANGE_SIZE FIRST_32_SECOND_64(1ULL << 32, 1ULL << 48)
++#elif SANITIZER_LOONGARCH64
++# define SANITIZER_MMAP_RANGE_SIZE 1ULL << 40
+ #else
+ # define SANITIZER_MMAP_RANGE_SIZE FIRST_32_SECOND_64(1ULL << 32, 1ULL << 47)
+ #endif
+@@ -211,6 +219,8 @@
+ #ifndef SANITIZER_USES_CANONICAL_LINUX_SYSCALLS
+ # if defined(__aarch64__) && SANITIZER_LINUX
+ # define SANITIZER_USES_CANONICAL_LINUX_SYSCALLS 1
++#elif SANITIZER_LOONGARCH64
++# define SANITIZER_USES_CANONICAL_LINUX_SYSCALLS 1
+ # else
+ # define SANITIZER_USES_CANONICAL_LINUX_SYSCALLS 0
+ # endif
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_platform_interceptors.h b/src/libsanitizer/sanitizer_common/sanitizer_platform_interceptors.h
+index b9eb09ad3..70fe0462c 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_platform_interceptors.h
++++ b/src/libsanitizer/sanitizer_common/sanitizer_platform_interceptors.h
+@@ -205,7 +205,7 @@
+ #if SI_LINUX_NOT_ANDROID && \
+   (defined(__i386) || defined(__x86_64) || defined(__mips64) || \
+     defined(__powerpc64__) || defined(__aarch64__) || defined(__arm__) || \
+-    defined(__s390__))
++    defined(__s390__) || defined(__loongarch__))
+ #define SANITIZER_INTERCEPT_PTRACE 1
+ #else
+ #define SANITIZER_INTERCEPT_PTRACE 0
+@@ -381,8 +381,13 @@
+ #define SANITIZER_INTERCEPT_MEMALIGN (!SI_FREEBSD && !SI_MAC && !SI_NETBSD)
+ #define SANITIZER_INTERCEPT_PVALLOC \
+   (!SI_FREEBSD && !SI_MAC && !SI_NETBSD && SI_NOT_FUCHSIA)
++  // cfree is removed since glibc 2.26. LoongArch old-world (2.28) does not have it.
++  // If we allow lsan to intercept cfree using INTERCEPT_FUNCTION, dlsym would
++  // fail and in turn calls the already-intercepted malloc in this case (yes,
++  // won't call if succeeded), causing the malloc interceptor to detect the
++  // global initialization flag "lsan_init_is_running" and report failure.
+ #define SANITIZER_INTERCEPT_CFREE \
+-  (!SI_FREEBSD && !SI_MAC && !SI_NETBSD && SI_NOT_FUCHSIA)
++  (!SI_FREEBSD && !SI_MAC && !SI_NETBSD && SI_NOT_FUCHSIA && !SANITIZER_LOONGARCH64)
+ #define SANITIZER_INTERCEPT_ALIGNED_ALLOC (!SI_MAC)
+ #define SANITIZER_INTERCEPT_MALLOC_USABLE_SIZE (!SI_MAC)
+ #define SANITIZER_INTERCEPT_MCHECK_MPROBE SI_LINUX_NOT_ANDROID
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_linux.cc b/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_linux.cc
+index 23a014823..7ef59f272 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_linux.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_linux.cc
+@@ -64,7 +64,7 @@ namespace __sanitizer {
+ 
+ #if !defined(__powerpc64__) && !defined(__x86_64__) && !defined(__aarch64__)\
+                             && !defined(__mips__) && !defined(__s390__)\
+-                            && !defined(__sparc__)
++                            && !defined(__sparc__) && !SANITIZER_LOONGARCH64
+ COMPILER_CHECK(struct___old_kernel_stat_sz == sizeof(struct __old_kernel_stat));
+ #endif
+ 
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.cc b/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.cc
+index a915d37cd..0803308d9 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.cc
+@@ -115,7 +115,8 @@
+ #if SANITIZER_LINUX || SANITIZER_FREEBSD
+ # include <utime.h>
+ # include <sys/ptrace.h>
+-# if defined(__mips64) || defined(__aarch64__) || defined(__arm__)
++# if defined(__mips64) || defined(__aarch64__) \
++     || defined(__arm__) || SANITIZER_LOONGARCH64
+ #  include <asm/ptrace.h>
+ #  ifdef __arm__
+ typedef struct user_fpregs elf_fpregset_t;
+@@ -253,7 +254,7 @@ namespace __sanitizer {
+   // has been removed from glibc 2.28.
+ #if defined(__aarch64__) || defined(__s390x__) || defined (__mips64) \
+   || defined(__powerpc64__) || defined(__arch64__) || defined(__sparcv9) \
+-  || defined(__x86_64__)
++  || defined(__x86_64__) || SANITIZER_LOONGARCH64
+ #define SIZEOF_STRUCT_USTAT 32
+ #elif defined(__arm__) || defined(__i386__) || defined(__mips__) \
+   || defined(__powerpc__) || defined(__s390__) || defined(__sparc__)
+@@ -326,7 +327,7 @@ unsigned struct_ElfW_Phdr_sz = sizeof(Elf_Phdr);
+ #if SANITIZER_LINUX && !SANITIZER_ANDROID && \
+     (defined(__i386) || defined(__x86_64) || defined(__mips64) || \
+       defined(__powerpc64__) || defined(__aarch64__) || defined(__arm__) || \
+-      defined(__s390__))
++      defined(__s390__)) || SANITIZER_LOONGARCH64
+ #if defined(__mips64) || defined(__powerpc64__) || defined(__arm__)
+   unsigned struct_user_regs_struct_sz = sizeof(struct pt_regs);
+   unsigned struct_user_fpregs_struct_sz = sizeof(elf_fpregset_t);
+@@ -336,17 +337,21 @@ unsigned struct_ElfW_Phdr_sz = sizeof(Elf_Phdr);
+ #elif defined(__s390__)
+   unsigned struct_user_regs_struct_sz = sizeof(struct _user_regs_struct);
+   unsigned struct_user_fpregs_struct_sz = sizeof(struct _user_fpregs_struct);
++#elif SANITIZER_LOONGARCH64
++  unsigned struct_user_regs_struct_sz = sizeof(struct user_pt_regs);
++  unsigned struct_user_fpregs_struct_sz = sizeof(struct user_fp_state);
+ #else
+   unsigned struct_user_regs_struct_sz = sizeof(struct user_regs_struct);
+   unsigned struct_user_fpregs_struct_sz = sizeof(struct user_fpregs_struct);
+ #endif // __mips64 || __powerpc64__ || __aarch64__
+ #if defined(__x86_64) || defined(__mips64) || defined(__powerpc64__) || \
+-    defined(__aarch64__) || defined(__arm__) || defined(__s390__)
++    defined(__aarch64__) || defined(__arm__) || defined(__s390__) || \
++    SANITIZER_LOONGARCH64
+   unsigned struct_user_fpxregs_struct_sz = 0;
+ #else
+   unsigned struct_user_fpxregs_struct_sz = sizeof(struct user_fpxregs_struct);
+ #endif // __x86_64 || __mips64 || __powerpc64__ || __aarch64__ || __arm__
+-// || __s390__
++// || __s390__ || SANITIZER_LOONGARCH64
+ #ifdef __arm__
+   unsigned struct_user_vfpregs_struct_sz = ARM_VFPREGS_SIZE;
+ #else
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.h b/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.h
+index 4d11d0717..e77e147a4 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.h
++++ b/src/libsanitizer/sanitizer_common/sanitizer_platform_limits_posix.h
+@@ -102,6 +102,9 @@ namespace __sanitizer {
+   const unsigned struct___old_kernel_stat_sz = 0;
+   const unsigned struct_kernel_stat_sz = 64;
+   const unsigned struct_kernel_stat64_sz = 104;
++#elif SANITIZER_LOONGARCH64
++  const unsigned struct_kernel_stat_sz = 128;
++  const unsigned struct_kernel_stat64_sz = 0;
+ #endif
+   struct __sanitizer_perf_event_attr {
+     unsigned type;
+@@ -672,7 +675,13 @@ namespace __sanitizer {
+ 
+ #if SANITIZER_FREEBSD
+   typedef __sanitizer_sigset_t __sanitizer_kernel_sigset_t;
+-#elif defined(__mips__)
++#elif defined(__mips__) || SANITIZER_LOONGARCH64
++// Weird... The size of the following struct will be passed
++// as the fourth parameter of the "rt_sigprocmask" syscall,
++// which would return -EINVAL if this arg fails to meet the
++// kernel's expectation, which is actually 16 for LoongArch/MIPS
++// but not 128 in the kernel's exported user space header.
++// Why is that?
+   struct __sanitizer_kernel_sigset_t {
+     uptr sig[2];
+   };
+@@ -693,6 +702,16 @@ namespace __sanitizer {
+     __sanitizer_kernel_sigset_t sa_mask;
+     void (*sa_restorer)(void);
+   };
++#elif SANITIZER_LOONGARCH64
++  struct __sanitizer_kernel_sigaction_t {
++    union {
++      void (*handler)(int signo);
++      void (*sigaction)(int signo, void *info, void *ctx);
++    };
++    unsigned long sa_flags;
++    void (*sa_restorer)(void);
++    __sanitizer_kernel_sigset_t sa_mask;
++  };
+ #else
+   struct __sanitizer_kernel_sigaction_t {
+     union {
+@@ -840,7 +859,7 @@ namespace __sanitizer {
+ #if SANITIZER_LINUX && !SANITIZER_ANDROID && \
+   (defined(__i386) || defined(__x86_64) || defined(__mips64) || \
+     defined(__powerpc64__) || defined(__aarch64__) || defined(__arm__) || \
+-    defined(__s390__))
++    defined(__s390__) || SANITIZER_LOONGARCH64)
+   extern unsigned struct_user_regs_struct_sz;
+   extern unsigned struct_user_fpregs_struct_sz;
+   extern unsigned struct_user_fpxregs_struct_sz;
+@@ -1486,5 +1505,4 @@ struct __sanitizer_cookie_io_functions_t {
+                  offsetof(struct CLASS, MEMBER))
+ 
+ #endif  // SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_MAC
+-
+ #endif
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_stacktrace.cc b/src/libsanitizer/sanitizer_common/sanitizer_stacktrace.cc
+index 2de585c32..8efdb64b3 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_stacktrace.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_stacktrace.cc
+@@ -95,6 +95,9 @@ void BufferedStackTrace::FastUnwindStack(uptr pc, uptr bp, uptr stack_top,
+ #endif
+ #elif defined(__s390__)
+     uhwptr pc1 = frame[14];
++#elif SANITIZER_LOONGARCH64
++    // frame[-1] contains the return address
++    uhwptr pc1 = frame[-1];
+ #else
+     uhwptr pc1 = frame[1];
+ #endif
+@@ -107,7 +110,13 @@ void BufferedStackTrace::FastUnwindStack(uptr pc, uptr bp, uptr stack_top,
+       trace_buffer[size++] = (uptr) pc1;
+     }
+     bottom = (uptr)frame;
+-    frame = GetCanonicFrame((uptr)frame[0], stack_top, bottom);
++#if SANITIZER_LOONGARCH64
++    // frame[-2] contains fp of the previous frame
++    uptr new_bp = (uptr)frame[-2] ;
++#else
++    uptr new_bp = (uptr)frame[0];
++#endif
++    frame = GetCanonicFrame(new_bp, stack_top, bottom);
+   }
+ }
+ 
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc b/src/libsanitizer/sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc
+index d746fa540..b291a3f54 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc
+@@ -15,7 +15,7 @@
+ #if SANITIZER_LINUX && (defined(__x86_64__) || defined(__mips__) || \
+                         defined(__aarch64__) || defined(__powerpc64__) || \
+                         defined(__s390__) || defined(__i386__) || \
+-                        defined(__arm__))
++                        defined(__arm__)) || SANITIZER_LOONGARCH64
+ 
+ #include "sanitizer_stoptheworld.h"
+ 
+@@ -30,7 +30,7 @@
+ #include <sys/types.h> // for pid_t
+ #include <sys/uio.h> // for iovec
+ #include <elf.h> // for NT_PRSTATUS
+-#if defined(__aarch64__) && !SANITIZER_ANDROID
++#if (defined(__aarch64__) || SANITIZER_LOONGARCH64) && !SANITIZER_ANDROID
+ // GLIBC 2.20+ sys/user does not include asm/ptrace.h
+ # include <asm/ptrace.h>
+ #endif
+@@ -499,6 +499,11 @@ typedef _user_regs_struct regs_struct;
+ #define REG_SP gprs[15]
+ #define ARCH_IOVEC_FOR_GETREGSET
+ 
++#elif SANITIZER_LOONGARCH64
++typedef struct user_pt_regs regs_struct;
++#define REG_SP regs[3]
++#define ARCH_IOVEC_FOR_GETREGSET
++
+ #else
+ #error "Unsupported architecture"
+ #endif // SANITIZER_ANDROID && defined(__arm__)
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_symbolizer_libcdep.cc b/src/libsanitizer/sanitizer_common/sanitizer_symbolizer_libcdep.cc
+index df9344121..f463a9884 100644
+--- a/src/libsanitizer/sanitizer_common/sanitizer_symbolizer_libcdep.cc
++++ b/src/libsanitizer/sanitizer_common/sanitizer_symbolizer_libcdep.cc
+@@ -247,6 +247,9 @@ class LLVMSymbolizerProcess : public SymbolizerProcess {
+     const char* const kSymbolizerArch = "--default-arch=s390x";
+ #elif defined(__s390__)
+     const char* const kSymbolizerArch = "--default-arch=s390";
++#elif defined(__loongarch__)
++    /* This seems unnecessary for GCC.  */
++    const char* const kSymbolizerArch = "--default-arch=loongarch64";
+ #else
+     const char* const kSymbolizerArch = "--default-arch=unknown";
+ #endif
+diff --git a/src/libsanitizer/sanitizer_common/sanitizer_syscall_linux_loongarch64.inc b/src/libsanitizer/sanitizer_common/sanitizer_syscall_linux_loongarch64.inc
+new file mode 100644
+index 000000000..80f5e6be8
+--- /dev/null
++++ b/src/libsanitizer/sanitizer_common/sanitizer_syscall_linux_loongarch64.inc
+@@ -0,0 +1,171 @@
++//===-- sanitizer_syscall_linux_loongarch64.inc -----------------*- C++ -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// Implementations of internal_syscall and internal_iserror for
++// Linux/loongarch64.
++//
++//===----------------------------------------------------------------------===//
++
++// About local register variables:
++// https://gcc.gnu.org/onlinedocs/gcc/Local-Register-Variables.html#Local-Register-Variables
++//
++// Kernel ABI:
++// https://lore.kernel.org/loongarch/1f353678-3398-e30b-1c87-6edb278f74db@xen0n.name/T/#m1613bc86c2d7bf5f6da92bd62984302bfd699a2f
++//  syscall number is placed in a7
++//  parameters, if present, are placed in a0-a6
++//  upon return:
++//    the return value is placed in a0
++//    t0-t8 should be considered clobbered
++//    all other registers are preserved
++#define SYSCALL(name) __NR_##name
++
++#define INTERNAL_SYSCALL_CLOBBERS \
++  "memory", "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7", "$t8"
++
++static uptr __internal_syscall(u64 nr) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0");
++  __asm__ volatile("syscall 0\n\t"
++                   : "=r"(a0)
++                   : "r"(a7)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall0(n) (__internal_syscall)(n)
++
++static uptr __internal_syscall(u64 nr, u64 arg1) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall1(n, a1) (__internal_syscall)(n, (u64)(a1))
++
++static uptr __internal_syscall(u64 nr, u64 arg1, long arg2) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  register u64 a1 asm("$a1") = arg2;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7), "r"(a1)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall2(n, a1, a2) \
++  (__internal_syscall)(n, (u64)(a1), (long)(a2))
++
++static uptr __internal_syscall(u64 nr, u64 arg1, long arg2, long arg3) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  register u64 a1 asm("$a1") = arg2;
++  register u64 a2 asm("$a2") = arg3;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7), "r"(a1), "r"(a2)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall3(n, a1, a2, a3) \
++  (__internal_syscall)(n, (u64)(a1), (long)(a2), (long)(a3))
++
++static uptr __internal_syscall(u64 nr, u64 arg1, long arg2, long arg3,
++                               u64 arg4) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  register u64 a1 asm("$a1") = arg2;
++  register u64 a2 asm("$a2") = arg3;
++  register u64 a3 asm("$a3") = arg4;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7), "r"(a1), "r"(a2), "r"(a3)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall4(n, a1, a2, a3, a4) \
++  (__internal_syscall)(n, (u64)(a1), (long)(a2), (long)(a3), (long)(a4))
++
++static uptr __internal_syscall(u64 nr, u64 arg1, long arg2, long arg3, u64 arg4,
++                               long arg5) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  register u64 a1 asm("$a1") = arg2;
++  register u64 a2 asm("$a2") = arg3;
++  register u64 a3 asm("$a3") = arg4;
++  register u64 a4 asm("$a4") = arg5;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7), "r"(a1), "r"(a2), "r"(a3), "r"(a4)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall5(n, a1, a2, a3, a4, a5)                       \
++  (__internal_syscall)(n, (u64)(a1), (long)(a2), (long)(a3), (long)(a4), \
++                       (u64)(a5))
++
++static uptr __internal_syscall(u64 nr, u64 arg1, long arg2, long arg3, u64 arg4,
++                               long arg5, long arg6) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  register u64 a1 asm("$a1") = arg2;
++  register u64 a2 asm("$a2") = arg3;
++  register u64 a3 asm("$a3") = arg4;
++  register u64 a4 asm("$a4") = arg5;
++  register u64 a5 asm("$a5") = arg6;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall6(n, a1, a2, a3, a4, a5, a6)                   \
++  (__internal_syscall)(n, (u64)(a1), (long)(a2), (long)(a3), (long)(a4), \
++                       (u64)(a5), (long)(a6))
++
++static uptr __internal_syscall(u64 nr, u64 arg1, long arg2, long arg3, u64 arg4,
++                               long arg5, long arg6, long arg7) {
++  register u64 a7 asm("$a7") = nr;
++  register u64 a0 asm("$a0") = arg1;
++  register u64 a1 asm("$a1") = arg2;
++  register u64 a2 asm("$a2") = arg3;
++  register u64 a3 asm("$a3") = arg4;
++  register u64 a4 asm("$a4") = arg5;
++  register u64 a5 asm("$a5") = arg6;
++  register u64 a6 asm("$a6") = arg7;
++  __asm__ volatile("syscall 0\n\t"
++                   : "+r"(a0)
++                   : "r"(a7), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5),
++                     "r"(a6)
++                   : INTERNAL_SYSCALL_CLOBBERS);
++  return a0;
++}
++#define __internal_syscall7(n, a1, a2, a3, a4, a5, a6, a7)               \
++  (__internal_syscall)(n, (u64)(a1), (long)(a2), (long)(a3), (long)(a4), \
++                       (u64)(a5), (long)(a6), (long)(a7))
++
++#define __SYSCALL_NARGS_X(a1, a2, a3, a4, a5, a6, a7, a8, n, ...) n
++#define __SYSCALL_NARGS(...) \
++  __SYSCALL_NARGS_X(__VA_ARGS__, 7, 6, 5, 4, 3, 2, 1, 0, )
++#define __SYSCALL_CONCAT_X(a, b) a##b
++#define __SYSCALL_CONCAT(a, b) __SYSCALL_CONCAT_X(a, b)
++#define __SYSCALL_DISP(b, ...) \
++  __SYSCALL_CONCAT(b, __SYSCALL_NARGS(__VA_ARGS__))(__VA_ARGS__)
++
++#define internal_syscall(...) __SYSCALL_DISP(__internal_syscall, __VA_ARGS__)
++
++// Helper function used to avoid clobbering of errno.
++bool internal_iserror(uptr retval, int *internal_errno) {
++  if (retval >= (uptr)-4095) {
++    if (internal_errno)
++      *internal_errno = -retval;
++    return true;
++  }
++  return false;
++}
+diff --git a/src/libsanitizer/ubsan/ubsan_platform.h b/src/libsanitizer/ubsan/ubsan_platform.h
+index e73df6323..9596113a1 100644
+--- a/src/libsanitizer/ubsan/ubsan_platform.h
++++ b/src/libsanitizer/ubsan/ubsan_platform.h
+@@ -17,7 +17,7 @@
+      defined(__NetBSD__)) &&                                                   \
+     (defined(__x86_64__) || defined(__i386__) || defined(__arm__) ||           \
+      defined(__aarch64__) || defined(__mips__) || defined(__powerpc64__) ||    \
+-     defined(__s390__))
++     defined(__s390__) || defined __loongarch__)
+ # define CAN_SANITIZE_UB 1
+ #elif defined(_WIN32) || defined(__Fuchsia__)
+ # define CAN_SANITIZE_UB 1
+-- 
+2.39.3
+

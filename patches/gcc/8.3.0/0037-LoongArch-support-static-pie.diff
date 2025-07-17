@@ -1,0 +1,30 @@
+From 8ed623a478cca5f94733abd060fb5c5d111bdb5d Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Fri, 21 Jul 2023 15:07:17 +0800
+Subject: [PATCH 09/13] LoongArch: support -static-pie.
+
+Change-Id: I570c19f12c982d404a1e260539af2fbe02bb5932
+---
+ src/gcc/config/loongarch/gnu-user.h | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/gcc/config/loongarch/gnu-user.h b/src/gcc/config/loongarch/gnu-user.h
+index 603aed5a2..d8cbfb7e8 100644
+--- a/src/gcc/config/loongarch/gnu-user.h
++++ b/src/gcc/config/loongarch/gnu-user.h
+@@ -43,8 +43,10 @@ along with GCC; see the file COPYING3.  If not see
+ #undef GNU_USER_TARGET_LINK_SPEC
+ #define GNU_USER_TARGET_LINK_SPEC \
+   "%{G*} %{shared} -m " GNU_USER_LINK_EMULATION \
+-  "%{!shared: %{static} %{!static: %{rdynamic:-export-dynamic} " \
+-  "-dynamic-linker " GNU_USER_DYNAMIC_LINKER "}}"
++  "%{!shared: %{static} %{!static: %{!static-pie: \
++  %{rdynamic:-export-dynamic} " \
++  "-dynamic-linker " GNU_USER_DYNAMIC_LINKER "}}} \
++  %{static-pie:-static -pie --no-dynamic-linker -z text}"
+ 
+ 
+ /* Similar to standard Linux, but adding -ffast-math support.  */
+-- 
+2.31.1
+

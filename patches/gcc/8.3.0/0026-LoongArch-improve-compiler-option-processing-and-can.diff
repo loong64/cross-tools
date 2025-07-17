@@ -1,0 +1,1421 @@
+From 795f734a064d4674a7ecf06cd101597637ced854 Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Thu, 12 Jan 2023 14:26:22 +0800
+Subject: [PATCH 25/28] LoongArch: improve compiler option processing and
+ canonicalization
+
+- respect the order of -[no-]lsx and -m[no-]lasx flags
+- make all -m flags take effect after -m*=* parameters in the GCC driver
+- add -msimd=* for a canonical representation of the compiler configuration
+  (for display in -frecord-gcc-switches and --help=target -Q)
+- remove all uses of TARGET_LASX
+
+Change-Id: Ia1296f5e572c7eae6f14b7715f640059593cd353
+---
+ .../loongarch/genopts/loongarch-strings       |   7 +-
+ .../config/loongarch/genopts/loongarch.opt.in |  64 ++--
+ src/gcc/config/loongarch/loongarch-cpu.c      |   2 +-
+ src/gcc/config/loongarch/loongarch-def.c      |  19 +-
+ src/gcc/config/loongarch/loongarch-def.h      |  36 +--
+ src/gcc/config/loongarch/loongarch-driver.c   | 224 +++++++-------
+ src/gcc/config/loongarch/loongarch-driver.h   |  28 +-
+ src/gcc/config/loongarch/loongarch-opts.c     | 288 ++++++++----------
+ src/gcc/config/loongarch/loongarch-opts.h     |  31 +-
+ src/gcc/config/loongarch/loongarch-str.h      |   7 +-
+ src/gcc/config/loongarch/loongarch.c          |  18 +-
+ src/gcc/config/loongarch/loongarch.opt        |  58 ++--
+ src/gcc/config/loongarch/t-linux              |   2 +-
+ 13 files changed, 366 insertions(+), 418 deletions(-)
+
+diff --git a/src/gcc/config/loongarch/genopts/loongarch-strings b/src/gcc/config/loongarch/genopts/loongarch-strings
+index c7890eddc..eedadadb0 100644
+--- a/src/gcc/config/loongarch/genopts/loongarch-strings
++++ b/src/gcc/config/loongarch/genopts/loongarch-strings
+@@ -35,7 +35,7 @@ STR_ISA_BASE_LA64V100 la64
+ 
+ # -mfpu
+ OPTSTR_ISA_EXT_FPU    fpu
+-STR_ISA_EXT_NOFPU     none
++STR_NONE              none
+ STR_ISA_EXT_FPU0      0
+ STR_ISA_EXT_FPU32     32
+ STR_ISA_EXT_FPU64     64
+@@ -45,8 +45,9 @@ OPTSTR_SINGLE_FLOAT   single-float
+ OPTSTR_DOUBLE_FLOAT   double-float
+ 
+ # SIMD extensions
+-OPTSTR_LSX            lsx
+-OPTSTR_LASX           lasx
++OPTSTR_ISA_EXT_SIMD   simd
++STR_ISA_EXT_LSX       lsx
++STR_ISA_EXT_LASX      lasx
+ 
+ # -mabi=
+ OPTSTR_ABI_BASE	      abi
+diff --git a/src/gcc/config/loongarch/genopts/loongarch.opt.in b/src/gcc/config/loongarch/genopts/loongarch.opt.in
+index d90f8efb5..8206664b8 100644
+--- a/src/gcc/config/loongarch/genopts/loongarch.opt.in
++++ b/src/gcc/config/loongarch/genopts/loongarch.opt.in
+@@ -20,22 +20,12 @@
+ ; <http://www.gnu.org/licenses/>.
+ ;
+ 
+-; Variables (macros) that should be exported by loongarch.opt:
+-;   la_opt_switches,
+-;   la_opt_abi_base, la_opt_abi_ext,
+-;   la_opt_cpu_arch, la_opt_cpu_tune,
+-;   la_opt_fpu,
+-;   la_cmodel.
+-
+ HeaderInclude
+ config/loongarch/loongarch-opts.h
+ 
+ HeaderInclude
+ config/loongarch/loongarch-str.h
+ 
+-Variable
+-HOST_WIDE_INT la_opt_switches = 0
+-
+ ; ISA related options
+ ;; Base ISA
+ Enum
+@@ -52,7 +42,7 @@ Name(isa_ext_fpu) Type(int)
+ FPU types of LoongArch:
+ 
+ EnumValue
+-Enum(isa_ext_fpu) String(@@STR_ISA_EXT_NOFPU@@) Value(ISA_EXT_NOFPU)
++Enum(isa_ext_fpu) String(@@STR_NONE@@) Value(ISA_EXT_NONE)
+ 
+ EnumValue
+ Enum(isa_ext_fpu) String(@@STR_ISA_EXT_FPU32@@) Value(ISA_EXT_FPU32)
+@@ -61,31 +51,48 @@ EnumValue
+ Enum(isa_ext_fpu) String(@@STR_ISA_EXT_FPU64@@) Value(ISA_EXT_FPU64)
+ 
+ m@@OPTSTR_ISA_EXT_FPU@@=
+-Target RejectNegative Joined ToLower Enum(isa_ext_fpu) Var(la_opt_fpu) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined ToLower Enum(isa_ext_fpu) Var(la_opt_fpu) Init(M_OPT_UNSET)
+ -m@@OPTSTR_ISA_EXT_FPU@@=FPU	Generate code for the given FPU.
+ 
+ m@@OPTSTR_ISA_EXT_FPU@@=@@STR_ISA_EXT_FPU0@@
+-Target RejectNegative Alias(m@@OPTSTR_ISA_EXT_FPU@@=,@@STR_ISA_EXT_NOFPU@@)
++Target RejectNegative Alias(m@@OPTSTR_ISA_EXT_FPU@@=,@@STR_NONE@@)
+ 
+ m@@OPTSTR_SOFT_FLOAT@@
+-Target Driver RejectNegative Var(la_opt_switches) Mask(FORCE_SOFTF) Negative(m@@OPTSTR_SINGLE_FLOAT@@)
++Target Driver Defer Var(la_deferred_options) RejectNegative Negative(m@@OPTSTR_SINGLE_FLOAT@@)
+ Prevent the use of all hardware floating-point instructions.
+ 
+ m@@OPTSTR_SINGLE_FLOAT@@
+-Target Driver RejectNegative Var(la_opt_switches) Mask(FORCE_F32) Negative(m@@OPTSTR_DOUBLE_FLOAT@@)
++Target Driver Defer Var(la_deferred_options) RejectNegative Negative(m@@OPTSTR_DOUBLE_FLOAT@@)
+ Restrict the use of hardware floating-point instructions to 32-bit operations.
+ 
+ m@@OPTSTR_DOUBLE_FLOAT@@
+-Target Driver RejectNegative Var(la_opt_switches) Mask(FORCE_F64) Negative(m@@OPTSTR_SOFT_FLOAT@@)
++Target Driver Defer Var(la_deferred_options) RejectNegative Negative(m@@OPTSTR_SOFT_FLOAT@@)
+ Allow hardware floating-point instructions to cover both 32-bit and 64-bit operations.
+ 
+-m@@OPTSTR_LSX@@
+-Target Var(la_opt_switches) Mask(LSX) Negative(m@@OPTSTR_LASX@@)
+-Enable LoongArch SIMD Extension (LSX).
++Enum
++Name(isa_ext_simd) Type(int)
++SIMD extension levels of LoongArch:
++
++EnumValue
++Enum(isa_ext_simd) String(@@STR_NONE@@) Value(ISA_EXT_NONE)
++
++EnumValue
++Enum(isa_ext_simd) String(@@STR_ISA_EXT_LSX@@) Value(ISA_EXT_SIMD_LSX)
++
++EnumValue
++Enum(isa_ext_simd) String(@@STR_ISA_EXT_LASX@@) Value(ISA_EXT_SIMD_LASX)
++
++m@@OPTSTR_ISA_EXT_SIMD@@=
++Target RejectNegative Joined ToLower Enum(isa_ext_simd) Var(la_opt_simd) Init(M_OPT_UNSET)
++-msimd=SIMD	Generate code for the given SIMD extension.
++
++m@@STR_ISA_EXT_LSX@@
++Target Driver Defer Var(la_deferred_options)
++Enable LoongArch SIMD Extension (LSX, 128-bit).
+ 
+-m@@OPTSTR_LASX@@
+-Target Var(la_opt_switches) Mask(LASX) Negative(m@@OPTSTR_LSX@@)
+-Enable LoongArch Advanced SIMD Extension (LASX).
++m@@STR_ISA_EXT_LASX@@
++Target Driver Defer Var(la_deferred_options)
++Enable LoongArch Advanced SIMD Extension (LASX, 256-bit).
+ 
+ ;; Base target models (implies ISA & tune parameters)
+ Enum
+@@ -114,11 +121,11 @@ EnumValue
+ Enum(cpu_type) String(@@STR_CPU_2K1500@@) Value(CPU_2K1500)
+ 
+ m@@OPTSTR_ARCH@@=
+-Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_arch) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_arch) Init(M_OPT_UNSET)
+ -m@@OPTSTR_ARCH@@=PROCESSOR	Generate code for the given PROCESSOR ISA.
+ 
+ m@@OPTSTR_TUNE@@=
+-Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_tune) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_tune) Init(M_OPT_UNSET)
+ -m@@OPTSTR_TUNE@@=PROCESSOR	Generate optimized code for PROCESSOR.
+ 
+ 
+@@ -140,16 +147,17 @@ EnumValue
+ Enum(abi_base) String(@@STR_ABI_BASE_LP64S@@) Value(ABI_BASE_LP64S)
+ 
+ m@@OPTSTR_ABI_BASE@@=
+-Target RejectNegative Joined ToLower Enum(abi_base) Var(la_opt_abi_base) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined ToLower Enum(abi_base) Var(la_opt_abi_base) Init(M_OPT_UNSET)
+ -m@@OPTSTR_ABI_BASE@@=BASEABI	Generate code that conforms to the given BASEABI.
+ 
+ ;; Legacy option: -mabi=lp64
+ m@@OPTSTR_ABI_BASE@@=@@STR_ABI_BASE_LP64@@
+-Target Driver RejectNegative Undocumented
++Target RejectNegative Mask(LP64)
++-m@@OPTSTR_ABI_BASE@@=@@STR_ABI_BASE_LP64@@	Legacy option that enables the lp64 integer ABI.
+ 
+ ;; ABI Extension
+ Variable
+-int la_opt_abi_ext = M_OPTION_NOT_SEEN
++int la_opt_abi_ext = M_OPT_UNSET
+ 
+ mbranch-cost=
+ Target RejectNegative Joined UInteger Var(loongarch_branch_cost)
+@@ -220,5 +228,5 @@ EnumValue
+ Enum(cmodel) String(@@STR_CMODEL_EXTREME@@) Value(CMODEL_EXTREME)
+ 
+ mcmodel=
+-Target RejectNegative Joined Enum(cmodel) Var(la_opt_cmodel) Init(CMODEL_NORMAL)
++Target RejectNegative Joined Enum(cmodel) Var(la_opt_cmodel) Init(M_OPT_UNSET)
+ Specify the code model.
+diff --git a/src/gcc/config/loongarch/loongarch-cpu.c b/src/gcc/config/loongarch/loongarch-cpu.c
+index a79700cdf..c9b859381 100644
+--- a/src/gcc/config/loongarch/loongarch-cpu.c
++++ b/src/gcc/config/loongarch/loongarch-cpu.c
+@@ -166,7 +166,7 @@ fill_native_cpu_config (struct loongarch_target *tgt)
+ 	    break;
+ 
+ 	  case 0x00:
+-	    tmp = ISA_EXT_NOFPU;
++	    tmp = ISA_EXT_NONE;
+ 	    break;
+ 
+ 	  default:
+diff --git a/src/gcc/config/loongarch/loongarch-def.c b/src/gcc/config/loongarch/loongarch-def.c
+index dcb40b339..cb1fd6ee0 100644
+--- a/src/gcc/config/loongarch/loongarch-def.c
++++ b/src/gcc/config/loongarch/loongarch-def.c
+@@ -187,11 +187,11 @@ loongarch_isa_base_strings[N_ISA_BASE_TYPES] = {
+ 
+ const char*
+ loongarch_isa_ext_strings[N_ISA_EXT_TYPES] = {
+-  [ISA_EXT_FPU64] = STR_ISA_EXT_FPU64,
++  [ISA_EXT_NONE] = STR_NONE,
+   [ISA_EXT_FPU32] = STR_ISA_EXT_FPU32,
+-  [ISA_EXT_NOFPU] = STR_ISA_EXT_NOFPU,
+-  [ISA_EXT_SIMD_LSX] = OPTSTR_LSX,
+-  [ISA_EXT_SIMD_LASX] = OPTSTR_LASX,
++  [ISA_EXT_FPU64] = STR_ISA_EXT_FPU64,
++  [ISA_EXT_SIMD_LSX] = STR_ISA_EXT_LSX,
++  [ISA_EXT_SIMD_LASX] = STR_ISA_EXT_LASX,
+ };
+ 
+ const char*
+@@ -216,15 +216,6 @@ loongarch_cmodel_strings[] = {
+   [CMODEL_EXTREME]	  = STR_CMODEL_EXTREME,
+ };
+ 
+-const char*
+-loongarch_switch_strings[] = {
+-  [SW_SOFT_FLOAT]	  = OPTSTR_SOFT_FLOAT,
+-  [SW_SINGLE_FLOAT]	  = OPTSTR_SINGLE_FLOAT,
+-  [SW_DOUBLE_FLOAT]	  = OPTSTR_DOUBLE_FLOAT,
+-  [SW_LSX]                = OPTSTR_LSX,
+-  [SW_LASX]               = OPTSTR_LASX,
+-};
+-
+ 
+ /* ABI-related definitions.  */
+ const struct loongarch_isa
+@@ -236,6 +227,6 @@ abi_minimal_isa[N_ABI_BASE_TYPES][N_ABI_EXT_TYPES] = {
+       [ABI_EXT_BASE] = {.base = ISA_BASE_LA64V100, .fpu = ISA_EXT_FPU32, .simd = 0},
+   },
+   [ABI_BASE_LP64S] = {
+-      [ABI_EXT_BASE] = {.base = ISA_BASE_LA64V100, .fpu = ISA_EXT_NOFPU, .simd = 0},
++      [ABI_EXT_BASE] = {.base = ISA_BASE_LA64V100, .fpu = ISA_EXT_NONE, .simd = 0},
+   },
+ };
+diff --git a/src/gcc/config/loongarch/loongarch-def.h b/src/gcc/config/loongarch/loongarch-def.h
+index dea3c599e..3b6d51c6e 100644
+--- a/src/gcc/config/loongarch/loongarch-def.h
++++ b/src/gcc/config/loongarch/loongarch-def.h
+@@ -59,7 +59,7 @@ extern const char* loongarch_isa_base_strings[];
+ 
+ /* enum isa_ext_* */
+ extern const char* loongarch_isa_ext_strings[];
+-#define ISA_EXT_NOFPU	      0
++#define ISA_EXT_NONE	      0
+ #define ISA_EXT_FPU32	      1
+ #define ISA_EXT_FPU64	      2
+ #define N_ISA_EXT_FPU_TYPES   3
+@@ -103,48 +103,34 @@ extern const char* loongarch_cmodel_strings[];
+ #define CMODEL_EXTREME	      4
+ #define N_CMODEL_TYPES	      5
+ 
+-/* enum switches */
+-/* The "SW_" codes represent command-line switches (options that
+-   accept no parameters). Definition for other switches that affects
+-   the target ISA / ABI configuration will also be appended here
+-   in the future.  */
+-
+-extern const char* loongarch_switch_strings[];
+-#define SW_SOFT_FLOAT	      0
+-#define SW_SINGLE_FLOAT	      1
+-#define SW_DOUBLE_FLOAT	      2
+-#define SW_LSX		      3
+-#define SW_LASX		      4
+-#define N_SWITCH_TYPES	      5
+-
+ /* The common default value for variables whose assignments
+    are triggered by command-line options.  */
+ 
+-#define M_OPTION_NOT_SEEN -1
+-#define M_OPT_ABSENT(opt_enum)  ((opt_enum) == M_OPTION_NOT_SEEN)
++#define M_OPT_UNSET -1
++#define M_OPT_ABSENT(opt_enum)  ((opt_enum) == M_OPT_UNSET)
+ 
+ 
+ /* Internal representation of the target.  */
+ struct loongarch_isa
+ {
+-  unsigned char base;	    /* ISA_BASE_ */
+-  unsigned char fpu;	    /* ISA_EXT_FPU_ */
+-  unsigned char simd;	    /* ISA_EXT_SIMD_ */
++  int base;	    /* ISA_BASE_ */
++  int fpu;	    /* ISA_EXT_FPU_ */
++  int simd;	    /* ISA_EXT_SIMD_ */
+ };
+ 
+ struct loongarch_abi
+ {
+-  unsigned char base;	    /* ABI_BASE_ */
+-  unsigned char ext;	    /* ABI_EXT_ */
++  int base;	    /* ABI_BASE_ */
++  int ext;	    /* ABI_EXT_ */
+ };
+ 
+ struct loongarch_target
+ {
+   struct loongarch_isa isa;
+   struct loongarch_abi abi;
+-  unsigned char cpu_arch;     /* CPU_ */
+-  unsigned char cpu_tune;     /* same */
+-  unsigned char cmodel;	      /* CMODEL_ */
++  int cpu_arch;	    /* CPU_ */
++  int cpu_tune;	    /* same */
++  int cmodel;	    /* CMODEL_ */
+ };
+ 
+ /* CPU properties.  */
+diff --git a/src/gcc/config/loongarch/loongarch-driver.c b/src/gcc/config/loongarch/loongarch-driver.c
+index be4b7a1c6..1f56df84f 100644
+--- a/src/gcc/config/loongarch/loongarch-driver.c
++++ b/src/gcc/config/loongarch/loongarch-driver.c
+@@ -26,87 +26,32 @@ along with GCC; see the file COPYING3.  If not see
+ #include "tm.h"
+ #include "obstack.h"
+ #include "diagnostic-core.h"
++#include "opts.h"
+ 
+ #include "loongarch-opts.h"
+ #include "loongarch-driver.h"
+ 
+-static int
+-  opt_arch_driver = M_OPTION_NOT_SEEN,
+-  opt_tune_driver = M_OPTION_NOT_SEEN,
+-  opt_fpu_driver = M_OPTION_NOT_SEEN,
+-  opt_abi_base_driver = M_OPTION_NOT_SEEN,
+-  opt_abi_ext_driver = M_OPTION_NOT_SEEN,
+-  opt_cmodel_driver = M_OPTION_NOT_SEEN;
+-
+-int opt_switches, opt_switches_set = 0;
+-
+ /* This flag is set to 1 if we believe that the user might be avoiding
+    linking (implicitly) against something from the startfile search paths.  */
+ static int no_link = 0;
+ 
+-
+ /* Use the public obstack from the gcc driver (defined in gcc.c).
+    This is for allocating space for the returned string.  */
+ extern struct obstack opts_obstack;
+ 
+-#define APPEND_LTR(S)				      \
+-  obstack_grow (&opts_obstack, (const void*) (S),     \
+-		sizeof ((S)) / sizeof (char) -1)
+-
+-#define APPEND_VAL(S) \
+-  obstack_grow (&opts_obstack, (const void*) (S), strlen ((S)))
+-
+-#define LARCH_DRIVER_SET_M_FLAG(IDX, STR, OPTS_ARRAY, N_OPTS)	\
+-  for (int i = 0; i < (N_OPTS); i++)				\
+-  {								\
+-    if ((OPTS_ARRAY)[i] != 0)					\
+-      if (strcmp ((STR), (OPTS_ARRAY)[i]) == 0)                 \
+-	(IDX) = i;						\
+-  }
+-
+ const char*
+-driver_set_m_flag (int argc, const char **argv)
++la_driver_init (int argc ATTRIBUTE_UNUSED, const char **argv ATTRIBUTE_UNUSED)
+ {
+-  gcc_assert (argc == 1);
+-
+-  if (strcmp (argv[0], "no_link") == 0)
+-    {
+-      no_link = 1;
+-    }
+-  else
+-    {
+-      int switch_idx = M_OPTION_NOT_SEEN;
+-
+-      LARCH_DRIVER_SET_M_FLAG (switch_idx, argv[0],
+-			       loongarch_switch_strings, N_SWITCH_TYPES);
+-
+-      gcc_assert (switch_idx != M_OPTION_NOT_SEEN);
+-      opt_switches |= loongarch_switch_mask[switch_idx];
+-      opt_switches_set |= loongarch_switch_mask[switch_idx];
+-    }
++  /* Initialize all fields of la_target to -1 */
++  loongarch_init_target (&la_target, M_OPT_UNSET, M_OPT_UNSET, M_OPT_UNSET,
++			 M_OPT_UNSET, M_OPT_UNSET, M_OPT_UNSET, M_OPT_UNSET);
+   return "";
+ }
+ 
+ const char*
+-driver_unset_m_flag (int argc, const char **argv)
++driver_set_no_link (int argc, const char **argv)
+ {
+-  gcc_assert (argc == 1);
+-
+-  if (strcmp (argv[0], "no_link") == 0)
+-    {
+-      no_link = 1;
+-    }
+-  else
+-    {
+-      int switch_idx = M_OPTION_NOT_SEEN;
+-
+-      LARCH_DRIVER_SET_M_FLAG (switch_idx, argv[0],
+-			       loongarch_switch_strings, N_SWITCH_TYPES);
+-
+-      gcc_assert (switch_idx != M_OPTION_NOT_SEEN);
+-      opt_switches &= ~loongarch_switch_mask[switch_idx];
+-      opt_switches_set |= loongarch_switch_mask[switch_idx];
+-    }
++  no_link = 1;
+   return "";
+ }
+ 
+@@ -115,60 +60,100 @@ driver_set_m_parm (int argc, const char **argv)
+ {
+   gcc_assert (argc == 2);
+ 
+-#undef MATCH_OPT
+-#define MATCH_OPT(NAME) \
+-  (strcmp (argv[0], OPTSTR_##NAME) == 0)
+-
+-  if (MATCH_OPT (ABI_BASE))
+-    {
+-      LARCH_DRIVER_SET_M_FLAG (opt_abi_base_driver, argv[1],
+-			       loongarch_abi_base_strings, N_ABI_BASE_OPTS)
+-    }
+-  else if (MATCH_OPT (ISA_EXT_FPU))
+-    {
+-      LARCH_DRIVER_SET_M_FLAG (opt_fpu_driver, argv[1],
+-			       loongarch_isa_ext_strings, N_ISA_EXT_FPU_TYPES)
+-    }
+-  else if (MATCH_OPT (ARCH))
+-    {
+-      LARCH_DRIVER_SET_M_FLAG (opt_arch_driver, argv[1],
+-			       loongarch_cpu_strings, N_ARCH_TYPES)
+-    }
+-  else if (MATCH_OPT (TUNE))
+-    {
+-      LARCH_DRIVER_SET_M_FLAG (opt_tune_driver, argv[1],
+-			       loongarch_cpu_strings, N_TUNE_TYPES)
++#define LARCH_DRIVER_PARSE_PARM(OPT_IDX, NAME, OPTSTR_LIST, \
++				OPT_IDX_LO, OPT_IDX_HI)	    \
++  if (strcmp (argv[0], OPTSTR_##NAME) == 0)		    \
++    for (int i = (OPT_IDX_LO); i < (OPT_IDX_HI); i++)	    \
++    {							    \
++      if ((OPTSTR_LIST)[i] != 0)			    \
++	if (strcmp (argv[1], (OPTSTR_LIST)[i]) == 0)	    \
++	  {						    \
++	    (OPT_IDX) = i;				    \
++	    return 0;					    \
++	  }						    \
+     }
+-  else if (MATCH_OPT (CMODEL))
+-    {
+-      LARCH_DRIVER_SET_M_FLAG (opt_cmodel_driver, argv[1],
+-			       loongarch_cmodel_strings, N_CMODEL_TYPES)
+-    }
+-  else
+-    gcc_unreachable ();
+ 
+-  return 0;
++  LARCH_DRIVER_PARSE_PARM (la_target.abi.base, ABI_BASE, \
++			   loongarch_abi_base_strings, 0, N_ABI_BASE_OPTS)
++
++  LARCH_DRIVER_PARSE_PARM (la_target.isa.fpu, ISA_EXT_FPU, \
++			   loongarch_isa_ext_strings, 0, N_ISA_EXT_FPU_TYPES)
++
++  LARCH_DRIVER_PARSE_PARM (la_target.isa.simd, ISA_EXT_SIMD, \
++			   loongarch_isa_ext_strings, 0, N_ISA_EXT_TYPES)
++
++  LARCH_DRIVER_PARSE_PARM (la_target.cpu_arch, ARCH, \
++			   loongarch_cpu_strings, 0, N_ARCH_TYPES)
++
++  LARCH_DRIVER_PARSE_PARM (la_target.cpu_tune, TUNE, \
++			   loongarch_cpu_strings, 0, N_TUNE_TYPES)
++
++  LARCH_DRIVER_PARSE_PARM (la_target.cmodel, CMODEL, \
++			   loongarch_cmodel_strings, 0, N_CMODEL_TYPES)
++
++  gcc_unreachable ();
++}
++
++static void
++driver_record_deferred_opts (struct loongarch_flags *flags)
++{
++  unsigned int i;
++  cl_deferred_option *opt;
++  vec<cl_deferred_option> *v = (vec<cl_deferred_option> *) la_deferred_options;
++
++  gcc_assert (flags);
++
++  /* Initialize flags */
++  flags->flt = M_OPT_UNSET;
++  flags->flt_str = NULL;
++  flags->sx[0] = flags->sx[1] = 0;
++
++  int sx_flag_idx = 0;
++
++  if (v)
++    FOR_EACH_VEC_ELT (*v, i, opt)
++      {
++	switch (opt->opt_index)
++	  {
++	  case OPT_mlsx:
++	    flags->sx[sx_flag_idx++] = ISA_EXT_SIMD_LSX * (opt->value ? 1 : -1);
++	    break;
++
++	  case OPT_mlasx:
++	    flags->sx[sx_flag_idx++] = ISA_EXT_SIMD_LASX * (opt->value ? 1 : -1);
++	    break;
++
++	  case OPT_msoft_float:
++	    flags->flt = ISA_EXT_NONE;
++	    flags->flt_str = OPTSTR_SOFT_FLOAT;
++	    break;
++
++	  case OPT_msingle_float:
++	    flags->flt = ISA_EXT_FPU32;
++	    flags->flt_str = OPTSTR_SINGLE_FLOAT;
++	    break;
++
++	  case OPT_mdouble_float:
++	    flags->flt = ISA_EXT_FPU64;
++	    flags->flt_str = OPTSTR_DOUBLE_FLOAT;
++	    break;
++
++	  default:
++	    gcc_unreachable ();
++	  }
++	gcc_assert (sx_flag_idx <= 2);
++      }
+ }
+ 
+ const char*
+-driver_get_normalized_m_opts (int argc, const char **argv)
++driver_get_normalized_m_opts (int argc, const char **argv ATTRIBUTE_UNUSED)
+ {
+   if (argc != 0)
+-    {
+-      (void) argv;  /* To make compiler shut up about unused argument.  */
+-      return " %eget_normalized_m_opts requires no argument.\n";
+-    }
++    return " %eget_normalized_m_opts requires no argument.\n";
+ 
+-  loongarch_config_target (& la_target,
+-			   opt_switches,
+-                           opt_switches_set,
+-			   opt_arch_driver,
+-			   opt_tune_driver,
+-			   opt_fpu_driver,
+-			   opt_abi_base_driver,
+-			   opt_abi_ext_driver,
+-			   opt_cmodel_driver,
+-			   !no_link /* follow_multilib_list */);
++  struct loongarch_flags flags;
++  driver_record_deferred_opts (&flags);
++  loongarch_config_target (&la_target, &flags, !no_link /* follow_multilib_list */);
+ 
+   /* Output normalized option strings.  */
+   obstack_blank (&opts_obstack, 0);
+@@ -187,15 +172,15 @@ driver_get_normalized_m_opts (int argc, const char **argv)
+    APPEND_LTR (" %<m" OPTSTR_##NAME "=* " \
+ 	       " -m" OPTSTR_##NAME "=")
+ 
+-#undef APPEND_SWITCH
+-#define APPEND_SWITCH(S) \
+-   APPEND_LTR (" %<m" S " -m" S)
++#undef CLEAR_FLAG
++#define CLEAR_FLAG(NAME) \
++  APPEND_LTR ( " %<m" NAME " %<mno-" NAME )
+ 
+-  for (int i = 0; i < N_SWITCH_TYPES; i++)
+-    {
+-      APPEND_LTR (" %<m");
+-      APPEND_VAL (loongarch_switch_strings[i]);
+-    }
++  CLEAR_FLAG (STR_ISA_EXT_LSX);
++  CLEAR_FLAG (STR_ISA_EXT_LASX);
++  CLEAR_FLAG (OPTSTR_SOFT_FLOAT);
++  CLEAR_FLAG (OPTSTR_SINGLE_FLOAT);
++  CLEAR_FLAG (OPTSTR_DOUBLE_FLOAT);
+ 
+   APPEND_OPT (ABI_BASE);
+   APPEND_VAL (loongarch_abi_base_strings[la_target.abi.base]);
+@@ -206,11 +191,8 @@ driver_get_normalized_m_opts (int argc, const char **argv)
+   APPEND_OPT (ISA_EXT_FPU);
+   APPEND_VAL (loongarch_isa_ext_strings[la_target.isa.fpu]);
+ 
+-  if (la_target.isa.simd)
+-    {
+-      APPEND_LTR (" %<m" OPTSTR_LSX " %<m" OPTSTR_LASX " -m");
+-      APPEND_VAL (loongarch_isa_ext_strings[la_target.isa.simd]);
+-    }
++  APPEND_OPT (ISA_EXT_SIMD);
++  APPEND_VAL (loongarch_isa_ext_strings[la_target.isa.simd]);
+ 
+   APPEND_OPT (CMODEL);
+   APPEND_VAL (loongarch_cmodel_strings[la_target.cmodel]);
+diff --git a/src/gcc/config/loongarch/loongarch-driver.h b/src/gcc/config/loongarch/loongarch-driver.h
+index a903c2873..6457e028f 100644
+--- a/src/gcc/config/loongarch/loongarch-driver.h
++++ b/src/gcc/config/loongarch/loongarch-driver.h
+@@ -24,47 +24,37 @@ along with GCC; see the file COPYING3.  If not see
+ #include "loongarch-str.h"
+ 
+ extern const char*
+-driver_set_m_parm (int argc, const char **argv);
++la_driver_init (int argc, const char **argv);
+ 
+ extern const char*
+-driver_set_m_flag (int argc, const char **argv);
++driver_set_m_parm (int argc, const char **argv);
+ 
+ extern const char*
+-driver_unset_m_flag (int argc, const char **argv);
++driver_set_no_link (int argc, const char **argv);
+ 
+ extern const char*
+ driver_get_normalized_m_opts (int argc, const char **argv);
+ 
+ #define EXTRA_SPEC_FUNCTIONS \
++  { "driver_init", la_driver_init }, \
+   { "set_m_parm", driver_set_m_parm  }, \
+-  { "set_m_flag", driver_set_m_flag  }, \
+-  { "unset_m_flag", driver_unset_m_flag  }, \
++  { "set_no_link", driver_set_no_link }, \
+   { "get_normalized_m_opts", driver_get_normalized_m_opts  },
+ 
+ /* Pre-process ABI-related options.  */
+ #define LA_SET_PARM_SPEC(NAME) \
+   " %{m" OPTSTR_##NAME  "=*: %:set_m_parm(" OPTSTR_##NAME " %*)}" \
+ 
+-#define LA_SET_FLAG_SPEC(NAME) \
+-  " %{m" OPTSTR_##NAME  ": %:set_m_flag(" OPTSTR_##NAME ")}" \
+-
+-#define LA_SET_SWITCH_SPEC(NAME) \
+-  " %{m" OPTSTR_##NAME  ": %:set_m_flag(" OPTSTR_##NAME ")}" \
+-  " %{mno-" OPTSTR_##NAME  ": %:unset_m_flag(" OPTSTR_##NAME ")}"
+-
+ #define DRIVER_HANDLE_MACHINE_OPTIONS \
+-  " %{c|S|E|nostdlib: %:set_m_flag(no_link)}" \
+-  " %{nostartfiles: %{nodefaultlibs: %:set_m_flag(no_link)}}" \
++  " %:driver_init()" \
++  " %{c|S|E|nostdlib: %:set_no_link()}" \
++  " %{nostartfiles: %{nodefaultlibs: %:set_no_link()}}" \
+   LA_SET_PARM_SPEC (ABI_BASE) \
+   LA_SET_PARM_SPEC (ARCH) \
+   LA_SET_PARM_SPEC (TUNE) \
+   LA_SET_PARM_SPEC (ISA_EXT_FPU) \
++  LA_SET_PARM_SPEC (ISA_EXT_SIMD) \
+   LA_SET_PARM_SPEC (CMODEL) \
+-  LA_SET_FLAG_SPEC (SOFT_FLOAT) \
+-  LA_SET_FLAG_SPEC (SINGLE_FLOAT) \
+-  LA_SET_FLAG_SPEC (DOUBLE_FLOAT) \
+-  LA_SET_SWITCH_SPEC (LSX) \
+-  LA_SET_SWITCH_SPEC (LASX) \
+   " %:get_normalized_m_opts()"
+ 
+ #define DRIVER_SELF_SPECS \
+diff --git a/src/gcc/config/loongarch/loongarch-opts.c b/src/gcc/config/loongarch/loongarch-opts.c
+index 7c907e3d7..ed95ca788 100644
+--- a/src/gcc/config/loongarch/loongarch-opts.c
++++ b/src/gcc/config/loongarch/loongarch-opts.c
+@@ -58,18 +58,6 @@ init_enabled_abi_types ()
+ #endif
+ }
+ 
+-/* Switch masks.  */
+-#undef M
+-#define M(NAME) OPTION_MASK_##NAME
+-const int loongarch_switch_mask[N_SWITCH_TYPES] = {
+-  /* SW_SOFT_FLOAT */    M(FORCE_SOFTF),
+-  /* SW_SINGLE_FLOAT */  M(FORCE_F32),
+-  /* SW_DOUBLE_FLOAT */  M(FORCE_F64),
+-  /* SW_LSX */           M(LSX),
+-  /* SW_LASX */          M(LASX),
+-};
+-#undef M
+-
+ /* String processing.  */
+ static struct obstack msg_obstack;
+ #define APPEND_STRING(STR) obstack_grow (&msg_obstack, STR, strlen(STR));
+@@ -107,18 +95,38 @@ static int abi_default_cpu_arch (struct loongarch_abi abi, struct loongarch_isa
+ #error missing definition of DEFAULT_ISA_EXT_FPU in ${tm_defines}.
+ #endif
+ 
+-/* Handle combinations of -m machine option values
++#ifndef DEFAULT_ISA_EXT_SIMD
++#define DEFAULT_ISA_EXT_SIMD ISA_EXT_NONE
++#endif
++
++/* Initialize loongarch_target from separate option variables.  */
++
++void
++loongarch_init_target (struct loongarch_target *target,
++		       int cpu_arch, int cpu_tune, int fpu, int simd,
++		       int abi_base, int abi_ext, int cmodel)
++{
++  if (!target)
++    return;
++  target->cpu_arch = cpu_arch;
++  target->cpu_tune = cpu_tune;
++  target->isa.fpu = fpu;
++  target->isa.simd = simd;
++  target->abi.base = abi_base;
++  target->abi.ext = abi_ext;
++  target->cmodel = cmodel;
++}
++
++
++/* Handle combinations of -m parameters
+    (see loongarch.opt and loongarch-opts.h).  */
++
+ void
+ loongarch_config_target (struct loongarch_target *target,
+-			 HOST_WIDE_INT opt_switches,
+-			 HOST_WIDE_INT opt_switches_set,
+-			 int opt_arch, int opt_tune, int opt_fpu,
+-			 int opt_abi_base, int opt_abi_ext,
+-			 int opt_cmodel, int follow_multilib_list)
++			 struct loongarch_flags *flags,
++			 int follow_multilib_list_p)
+ {
+   struct loongarch_target t;
+-
+   if (!target)
+     return;
+ 
+@@ -126,91 +134,77 @@ loongarch_config_target (struct loongarch_target *target,
+   init_enabled_abi_types ();
+   obstack_init (&msg_obstack);
+ 
+-#undef IS_SET
+-#define IS_SET(NAME) ((loongarch_switch_mask[(SW_##NAME)] & opt_switches_set))
+-
+-  int on_switch;
+-#undef IS_ON
+-#define IS_ON(NAME) ((loongarch_switch_mask[(SW_##NAME)] & opt_switches) \
+-		  ? (on_switch = (SW_##NAME), 1) : (on_switch = 0))
+-
+   struct {
+-    int arch, tune, fpu, abi_base, abi_ext, cmodel, simd;
++    int arch, tune, fpu, simd, abi_base, abi_ext, cmodel, abi_flt;
+   } constrained = {
+-      M_OPT_ABSENT (opt_arch)     ? 0 : 1,
+-      M_OPT_ABSENT (opt_tune)     ? 0 : 1,
+-      M_OPT_ABSENT (opt_fpu)      ? 0 : 1,
+-      M_OPT_ABSENT (opt_abi_base) ? 0 : 1,
+-      M_OPT_ABSENT (opt_abi_ext)  ? 0 : 1,
+-      M_OPT_ABSENT (opt_cmodel)   ? 0 : 1,
+-      /* Whether some SIMD extension is explicitly enabled.  */
+-      (IS_SET (LSX) && IS_ON (LSX)) || (IS_SET (LASX) && IS_ON (LASX)),
++      M_OPT_ABSENT (target->cpu_arch)	  ? 0 : 1,
++      M_OPT_ABSENT (target->cpu_tune)	  ? 0 : 1,
++      M_OPT_ABSENT (target->isa.fpu)	  ? 0 : 1,
++      M_OPT_ABSENT (target->isa.simd)	  ? 0 : 1,
++      M_OPT_ABSENT (target->abi.base)	  ? 0 : 1,
++      M_OPT_ABSENT (target->abi.ext)	  ? 0 : 1,
++      M_OPT_ABSENT (target->cmodel)	  ? 0 : 1,
++      M_OPT_ABSENT (target->abi.base)	  ? 0 : 1,
+   };
+ 
+   /* 1.  Target ABI */
+-
+-  if (constrained.abi_base && opt_abi_base >= N_ABI_BASE_TYPES)
+-    switch (opt_abi_base)
++  if (constrained.abi_base && target->abi.base >= N_ABI_BASE_TYPES)
++    /* Special treatments for legacy options ("-mabi=lp64")
++       in GCC driver.  */
++    switch (target->abi.base)
+       {
+-	/* Special treatments for legacy options ("-mabi=lp64")
+-	   in GCC driver.  */
+-
+-	case ABI_BASE_LP64:
+-	  t.abi.base = TO_LP64_ABI_BASE (DEFAULT_ABI_BASE);
+-	  break;
++      case ABI_BASE_LP64:
++	t.abi.base = TO_LP64_ABI_BASE (DEFAULT_ABI_BASE);
++	constrained.abi_flt = 0;
++	break;
+ 
+-	default:
+-	  gcc_unreachable ();
++      default:
++	gcc_unreachable ();
+       }
+   else if (constrained.abi_base)
+-    t.abi.base = opt_abi_base;
++    t.abi.base = target->abi.base;
+   else
+     t.abi.base = DEFAULT_ABI_BASE;
+ 
+-  t.abi.ext = constrained.abi_ext ? opt_abi_ext : DEFAULT_ABI_EXT;
++  t.abi.ext = constrained.abi_ext ? target->abi.ext : DEFAULT_ABI_EXT;
+ 
+-  /* Extra switch handling.  */
+-  if (IS_ON (SOFT_FLOAT) || IS_ON (SINGLE_FLOAT) || IS_ON (DOUBLE_FLOAT))
++  /* Process -m*-float flags */
++  if (flags && !M_OPT_ABSENT (flags->flt))
+     {
+-      switch (on_switch)
+-	{
+-	  case SW_SOFT_FLOAT:
+-	    opt_fpu = ISA_EXT_NOFPU;
+-	    break;
++      /* Modifying the original "target" here makes it easier to write the
++         t.isa.fpu assignment below, because otherwise there would be three
++	 levels of precedence (-m*-float / -mfpu / -march) to be handled
++	 (now the first two are merged). */
+ 
+-	  case SW_SINGLE_FLOAT:
+-	    opt_fpu = ISA_EXT_FPU32;
+-	    break;
+-
+-	  case SW_DOUBLE_FLOAT:
+-	    opt_fpu = ISA_EXT_FPU64;
+-	    break;
+-
+-	  default:
+-	    gcc_unreachable();
+-	}
++      target->isa.fpu = flags->flt;
+       constrained.fpu = 1;
+ 
+       /* The target ISA is not ready yet, but (isa_required (t.abi)
+-	 + forced fpu) is enough for computing the forced base ABI.  */
+-      struct loongarch_abi force_abi = t.abi;
++         + forced fpu) is enough for computing the forced base ABI.  */
++
+       struct loongarch_isa force_isa = isa_required (t.abi);
+-      force_isa.fpu = opt_fpu;
++      force_isa.fpu = flags->flt;
++
++      struct loongarch_abi force_abi;
+       force_abi.base = isa_default_abi (&force_isa).base;
+ 
+-      if (constrained.abi_base && (opt_abi_base < N_ABI_BASE_TYPES)
++      if (constrained.abi_base && constrained.abi_flt
+ 	  && (t.abi.base != force_abi.base))
+-	inform (UNKNOWN_LOCATION,
+-		"%<-m%s%> overrides %<-m%s=%s%>, adjusting ABI to %qs",
+-		loongarch_switch_strings[on_switch],
+-		OPTSTR_ABI_BASE, loongarch_abi_base_strings[t.abi.base],
+-		abi_str (force_abi));
++	{
++	  force_abi.ext = t.abi.ext;
++	  inform (UNKNOWN_LOCATION,
++		  "%<-m%s%> overrides %<-m%s=%s%>, adjusting ABI to %qs",
++		  flags->flt_str, OPTSTR_ABI_BASE,
++		  loongarch_abi_base_strings[t.abi.base],
++		  abi_str (force_abi));
++	}
+ 
+       t.abi.base = force_abi.base;
++      constrained.abi_flt = 1;
+     }
+ 
+ #ifdef LA_DISABLE_MULTILIB
+-  if (follow_multilib_list)
++  if (follow_multilib_list_p)
+     if (t.abi.base != DEFAULT_ABI_BASE || t.abi.ext != DEFAULT_ABI_EXT)
+       {
+ 	static const struct loongarch_abi default_abi
+@@ -222,12 +216,12 @@ loongarch_config_target (struct loongarch_target *target,
+ #endif
+ 
+   /* 2.  Target CPU */
+-  t.cpu_arch = constrained.arch ? opt_arch : DEFAULT_CPU_ARCH;
++  t.cpu_arch = constrained.arch ? target->cpu_arch : DEFAULT_CPU_ARCH;
+ 
+   /* If cpu_tune is not set using neither --with-tune nor -mtune,
+      the current cpu_arch is used as its default. */
+-  t.cpu_tune = constrained.tune ? opt_tune
+-    : (constrained.arch ? opt_arch :
++  t.cpu_tune = constrained.tune ? target->cpu_tune
++    : (constrained.arch ? target->cpu_arch :
+        (DEFAULT_CPU_TUNE == CPU_NONE ? DEFAULT_CPU_ARCH : DEFAULT_CPU_TUNE));
+ 
+ 
+@@ -270,35 +264,49 @@ config_target_isa:
+   /* Apply incremental changes.  */
+   /* "-march=native" overrides the default FPU type.  */
+ 
+-  t.isa.fpu = constrained.fpu ? opt_fpu :
++  t.isa.fpu = constrained.fpu ? target->isa.fpu :
+     (constrained.arch ? t.isa.fpu : DEFAULT_ISA_EXT_FPU);
+ 
+-  /* LoongArch SIMD extensions */
++  t.isa.simd = constrained.simd ? target->isa.simd :
++    (constrained.arch ? t.isa.simd : DEFAULT_ISA_EXT_SIMD);
+ 
+-  if (IS_SET (LASX) && IS_ON (LASX))
+-    {
+-      t.isa.simd = ISA_EXT_SIMD_LASX;
++  /* apply -m[no-]lsx and -m[no-]lasx flags */
++  if (flags)
++    for (int i = 0; i < 2; i++)
++      {
++	switch (SX_FLAG_TYPE (flags->sx[i]))
++	  {
++	  case ISA_EXT_SIMD_LSX:
++	    constrained.simd = 1;
++	    if (flags->sx[i] > 0 && t.isa.simd != ISA_EXT_SIMD_LASX)
++	      t.isa.simd = ISA_EXT_SIMD_LSX;
++	    else if (flags->sx[i] < 0)
++	      t.isa.simd = ISA_EXT_NONE;
++	    break;
+ 
+-      /* Warn about "-mno-lsx -mlasx".  */
+-      if (IS_SET (LSX) && !IS_ON (LSX))
+-	inform (UNKNOWN_LOCATION,
+-		"%<-mno-%s%> is overriden by %<-m%s%>",
+-		OPTSTR_LSX, OPTSTR_LASX);
+-    }
+-  else if (IS_SET (LSX) && !IS_ON (LSX))
+-    t.isa.simd = 0;
+-  else if (IS_SET (LASX) && !IS_ON (LASX) && t.isa.simd == ISA_EXT_SIMD_LASX)
+-    t.isa.simd = ISA_EXT_SIMD_LSX;
+-  else if (IS_SET (LSX) && IS_ON (LSX) && t.isa.simd == 0)
+-    t.isa.simd = ISA_EXT_SIMD_LSX;
++	  case ISA_EXT_SIMD_LASX:
++	    constrained.simd = 1;
++	    if (flags->sx[i] < 0 && t.isa.simd == ISA_EXT_SIMD_LASX)
++	      t.isa.simd = ISA_EXT_SIMD_LSX;
++	    else if (flags->sx[i] > 0)
++	      t.isa.simd = ISA_EXT_SIMD_LASX;
++	    break;
++
++	  case 0:
++	    break;
+ 
++	  default:
++	    gcc_unreachable();
++	  }
++      }
+ 
+   /* All SIMD extensions imply a 64-bit FPU:
+      - silently adjust t.isa.fpu to "fpu64" if it is unconstrained.
+-     - warn if -msingle-float / -msoft-float is on, then disable SIMD extensions
++     - warn if -msingle-float / -msoft-float is on,
++       then disable SIMD extensions (done in driver)
+      - abort if -mfpu=0 / -mfpu=32 is forced.  */
+ 
+-  if (t.isa.simd != 0 && t.isa.fpu != ISA_EXT_FPU64)
++  if (t.isa.simd != ISA_EXT_NONE && t.isa.fpu != ISA_EXT_FPU64)
+     {
+       if (!constrained.fpu)
+ 	{
+@@ -316,17 +324,15 @@ config_target_isa:
+ 
+ 	  t.isa.fpu = ISA_EXT_FPU64;
+ 	}
+-      else if (IS_ON (SOFT_FLOAT) || IS_ON (SINGLE_FLOAT))
++      else if (flags && (flags->flt == ISA_EXT_NONE || flags->flt == ISA_EXT_FPU32))
+ 	{
+ 	  if (constrained.simd)
+ 	    inform (UNKNOWN_LOCATION,
+ 		    "%qs is disabled by %<-m%s%>, because it requires %<%s%s%>",
+-		    loongarch_isa_ext_strings[t.isa.simd],
+-		    loongarch_switch_strings[on_switch],
++		    loongarch_isa_ext_strings[t.isa.simd], flags->flt_str,
+ 		    OPTSTR_ISA_EXT_FPU, loongarch_isa_ext_strings[ISA_EXT_FPU64]);
+ 
+-	  /* SIMD that comes from arch default.  */
+-	  t.isa.simd = 0;
++	  t.isa.simd = ISA_EXT_NONE;
+ 	}
+       else
+ 	{
+@@ -339,7 +345,7 @@ config_target_isa:
+                          OPTSTR_ISA_EXT_FPU, loongarch_isa_ext_strings[ISA_EXT_FPU64]);
+ 
+ 	  /* Same as above.  */
+-	  t.isa.simd = 0;
++	  t.isa.simd = ISA_EXT_NONE;
+ 	}
+     }
+ 
+@@ -411,7 +417,7 @@ fatal:
+   if (abi_tmp.base != t.abi.base || abi_tmp.ext != t.abi.ext)
+     {
+       /* This flag is only set in the GCC driver.  */
+-      if (follow_multilib_list)
++      if (follow_multilib_list_p)
+ 	{
+ 
+ 	  /* Continue falling back until we find a feasible ABI type
+@@ -452,7 +458,7 @@ fatal:
+ fallback:
+       t.abi = abi_tmp;
+     }
+-  else if (follow_multilib_list)
++  else if (follow_multilib_list_p)
+     {
+       if (!is_multilib_enabled (t.abi))
+ 	{
+@@ -467,7 +473,7 @@ fallback:
+ 
+ 
+   /* 5.  Target code model */
+-  t.cmodel = constrained.cmodel ? opt_cmodel : CMODEL_NORMAL;
++  t.cmodel = constrained.cmodel ? target->cmodel : CMODEL_NORMAL;
+ 
+   /* Cleanup and return.  */
+   obstack_free (&msg_obstack, NULL);
+@@ -492,7 +498,7 @@ isa_default_abi (const struct loongarch_isa *isa)
+ 	  abi.base = ABI_BASE_LP64F;
+ 	break;
+ 
+-      case ISA_EXT_NOFPU:
++      case ISA_EXT_NONE:
+ 	if (isa->base == ISA_BASE_LA64V100)
+ 	  abi.base = ABI_BASE_LP64S;
+ 	break;
+@@ -532,7 +538,7 @@ isa_fpu_compat_p (const struct loongarch_isa *set1,
+       case ISA_EXT_FPU32:
+ 	return set1->fpu == ISA_EXT_FPU32 || set1->fpu == ISA_EXT_FPU64;
+ 
+-      case ISA_EXT_NOFPU:
++      case ISA_EXT_NONE:
+ 	return 1;
+ 
+       default:
+@@ -555,7 +561,7 @@ abi_compat_p (const struct loongarch_isa *isa, struct loongarch_abi abi)
+ 
+ /* The behavior of this function should be consistent
+    with config.gcc.  */
+-static inline int
++static int
+ abi_default_cpu_arch (struct loongarch_abi abi,
+ 		      struct loongarch_isa *isa)
+ {
+@@ -600,7 +606,7 @@ isa_str (const struct loongarch_isa *isa, char separator)
+   APPEND_STRING (loongarch_isa_base_strings[isa->base])
+   APPEND1 (separator)
+ 
+-  if (isa->fpu == ISA_EXT_NOFPU)
++  if (isa->fpu == ISA_EXT_NONE)
+     {
+       APPEND_STRING ("no" OPTSTR_ISA_EXT_FPU)
+     }
+@@ -686,57 +692,19 @@ loongarch_update_gcc_opt_status (struct loongarch_target *target,
+ 				 struct gcc_options *opts,
+ 				 struct gcc_options *opts_set)
+ {
+-  /* status of -march and -mtune */
+-  opts->x_la_opt_cpu_arch = target->cpu_arch;
+-  opts->x_la_opt_cpu_tune = target->cpu_tune;
++  (void) opts_set;
+ 
+-  /* status of -mlsx and -mlasx */
+-  opts->x_la_opt_switches &= ~OPTION_MASK_LSX;
+-  opts->x_la_opt_switches &= ~OPTION_MASK_LASX;
++  /* status of -mabi */
++  opts->x_la_opt_abi_base = target->abi.base;
+ 
+-  switch (target->isa.simd)
+-    {
+-      case 0:
+-        break;
+-
+-      case ISA_EXT_SIMD_LSX:
+-	opts->x_la_opt_switches |= OPTION_MASK_LSX;
+-        break;
++  opts->x_target_flags |=
++    IS_LP64_ABI_BASE (target->abi.base) ? MASK_LP64 : 0;
+ 
+-      case ISA_EXT_SIMD_LASX:
+-	opts->x_la_opt_switches |= OPTION_MASK_LSX;
+-	opts->x_la_opt_switches |= OPTION_MASK_LASX;
+-        break;
+-
+-      default:
+-	gcc_unreachable ();
+-    }
+-
+-  /* status of -m*-float and -mfpu */
+-  opts->x_la_opt_switches &= ~OPTION_MASK_FORCE_SOFTF;
+-  opts->x_la_opt_switches &= ~OPTION_MASK_FORCE_F32;
+-  opts->x_la_opt_switches &= ~OPTION_MASK_FORCE_F64;
++  /* status of -march and -mtune */
++  opts->x_la_opt_cpu_arch = target->cpu_arch;
++  opts->x_la_opt_cpu_tune = target->cpu_tune;
+ 
++  /* status of -mfpu and -msimd */
+   opts->x_la_opt_fpu = target->isa.fpu;
+-
+-  switch (target->isa.fpu)
+-    {
+-      case ISA_EXT_NOFPU:
+-	if (ABI_FPU_NONE (target->abi.base))
+-	  opts->x_la_opt_switches |= OPTION_MASK_FORCE_SOFTF;
+-	break;
+-
+-      case ISA_EXT_FPU32:
+-	if (ABI_FPU_32 (target->abi.base))
+-	  opts->x_la_opt_switches |= OPTION_MASK_FORCE_F32;
+-	break;
+-
+-      case ISA_EXT_FPU64:
+-	if (ABI_FPU_64 (target->abi.base))
+-	  opts->x_la_opt_switches |= OPTION_MASK_FORCE_F64;
+-	break;
+-
+-      default:
+-	gcc_unreachable ();
+-    }
++  opts->x_la_opt_simd = target->isa.simd;
+ }
+diff --git a/src/gcc/config/loongarch/loongarch-opts.h b/src/gcc/config/loongarch/loongarch-opts.h
+index c9433de0b..9030ca224 100644
+--- a/src/gcc/config/loongarch/loongarch-opts.h
++++ b/src/gcc/config/loongarch/loongarch-opts.h
+@@ -21,26 +21,35 @@ along with GCC; see the file COPYING3.  If not see
+ #ifndef LOONGARCH_OPTS_H
+ #define LOONGARCH_OPTS_H
+ 
++#include "loongarch-def.h"
+ 
+ /* Target configuration */
+ extern struct loongarch_target la_target;
+ 
+-/* Switch masks */
+-extern const int loongarch_switch_mask[];
+-
+-#include "loongarch-def.h"
++/* Flag status */
++struct loongarch_flags {
++    int flt; const char* flt_str;
++#define SX_FLAG_TYPE(x) ((x) < 0 ? -(x) : (x))
++    int sx[2];
++};
+ 
+ #if !defined(IN_LIBGCC2) && !defined(IN_TARGET_LIBS) && !defined(IN_RTS)
++
++/* Initialize loongarch_target from separate option variables.  */
++void
++loongarch_init_target (struct loongarch_target *target,
++		       int cpu_arch, int cpu_tune, int fpu, int simd,
++		       int abi_base, int abi_ext, int cmodel);
++
++
+ /* Handler for "-m" option combinations,
+    shared by the driver and the compiler proper.  */
+ void
+ loongarch_config_target (struct loongarch_target *target,
+-			 HOST_WIDE_INT opt_switches,
+-			 HOST_WIDE_INT opt_switches_set,
+-			 int opt_arch, int opt_tune, int opt_fpu,
+-			 int opt_abi_base, int opt_abi_ext,
+-			 int opt_cmodel, int follow_multilib_list);
++			 struct loongarch_flags *flags,
++			 int follow_multilib_list_p);
+ 
++/* option status feedback for "gcc --help=target -Q" */
+ void
+ loongarch_update_gcc_opt_status (struct loongarch_target *target,
+ 				 struct gcc_options *opts,
+@@ -55,11 +64,11 @@ loongarch_update_gcc_opt_status (struct loongarch_target *target,
+ #define TARGET_CMODEL_LARGE	    (la_target.cmodel == CMODEL_LARGE)
+ #define TARGET_CMODEL_EXTREME	    (la_target.cmodel == CMODEL_EXTREME)
+ 
+-#define TARGET_HARD_FLOAT	    (la_target.isa.fpu != ISA_EXT_NOFPU)
++#define TARGET_HARD_FLOAT	    (la_target.isa.fpu != ISA_EXT_NONE)
+ #define TARGET_HARD_FLOAT_ABI	    (la_target.abi.base == ABI_BASE_LP64D \
+ 				     || la_target.abi.base == ABI_BASE_LP64F)
+ 
+-#define TARGET_SOFT_FLOAT	  (la_target.isa.fpu == ISA_EXT_NOFPU)
++#define TARGET_SOFT_FLOAT	  (la_target.isa.fpu == ISA_EXT_NONE)
+ #define TARGET_SOFT_FLOAT_ABI	  (la_target.abi.base == ABI_BASE_LP64S)
+ #define TARGET_SINGLE_FLOAT	  (la_target.isa.fpu == ISA_EXT_FPU32)
+ #define TARGET_SINGLE_FLOAT_ABI	  (la_target.abi.base == ABI_BASE_LP64F)
+diff --git a/src/gcc/config/loongarch/loongarch-str.h b/src/gcc/config/loongarch/loongarch-str.h
+index 1fe123f82..76def7428 100644
+--- a/src/gcc/config/loongarch/loongarch-str.h
++++ b/src/gcc/config/loongarch/loongarch-str.h
+@@ -37,7 +37,7 @@ along with GCC; see the file COPYING3.  If not see
+ #define STR_ISA_BASE_LA64V100 "la64"
+ 
+ #define OPTSTR_ISA_EXT_FPU "fpu"
+-#define STR_ISA_EXT_NOFPU "none"
++#define STR_NONE "none"
+ #define STR_ISA_EXT_FPU0 "0"
+ #define STR_ISA_EXT_FPU32 "32"
+ #define STR_ISA_EXT_FPU64 "64"
+@@ -46,8 +46,9 @@ along with GCC; see the file COPYING3.  If not see
+ #define OPTSTR_SINGLE_FLOAT "single-float"
+ #define OPTSTR_DOUBLE_FLOAT "double-float"
+ 
+-#define OPTSTR_LSX "lsx"
+-#define OPTSTR_LASX "lasx"
++#define OPTSTR_ISA_EXT_SIMD "simd"
++#define STR_ISA_EXT_LSX "lsx"
++#define STR_ISA_EXT_LASX "lasx"
+ 
+ #define OPTSTR_ABI_BASE "abi"
+ #define STR_ABI_BASE_LP64D "lp64d"
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index 48ca5c2fb..8440c3b73 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -68,6 +68,7 @@ along with GCC; see the file COPYING3.  If not see
+ #include "gimple-iterator.h"
+ #include "tree-vectorizer.h"
+ #include "params.h"
++#include "opts.h"
+ 
+ /* This file should be included last.  */
+ #include "target-def.h"
+@@ -7035,10 +7036,13 @@ loongarch_option_override_internal (struct gcc_options *opts,
+   if (flag_pic)
+     g_switch_value = 0;
+ 
++  loongarch_init_target (&la_target,
++			 la_opt_cpu_arch, la_opt_cpu_tune, la_opt_fpu,
++			 la_opt_simd, la_opt_abi_base, la_opt_abi_ext,
++			 la_opt_cmodel);
++
+   /* Handle target-specific options: compute defaults/conflicts etc.  */
+-  loongarch_config_target (&la_target, la_opt_switches, opts_set->x_la_opt_switches,
+-			   la_opt_cpu_arch, la_opt_cpu_tune, la_opt_fpu,
+-			   la_opt_abi_base, la_opt_abi_ext, la_opt_cmodel, 0);
++  loongarch_config_target (&la_target, NULL, 0);
+ 
+   loongarch_update_gcc_opt_status (&la_target, opts, opts_set);
+   loongarch_cpu_option_override (&la_target, opts, opts_set);
+@@ -7397,7 +7401,7 @@ loongarch_expand_vec_perm_interleave (struct expand_vec_perm_d *d)
+ 
+   if (d->one_vector_p)
+     return false;
+-  if (TARGET_LASX && GET_MODE_SIZE (d->vmode) == 32)
++  if (ISA_HAS_LASX && GET_MODE_SIZE (d->vmode) == 32)
+     ;
+   else
+     return false;
+@@ -7559,7 +7563,7 @@ static bool
+ loongarch_expand_vec_perm_even_odd (struct expand_vec_perm_d *d)
+ {
+   unsigned i, odd, nelt = d->nelt;
+-  if(!TARGET_LASX)
++  if(!ISA_HAS_LASX)
+     return false;
+ 
+   odd = d->perm[0];
+@@ -9310,7 +9314,7 @@ loongarch_expand_vector_extract (rtx target, rtx vec, int elt)
+       break;
+ 
+     case E_V32QImode:
+-      if (TARGET_LASX)
++      if (ISA_HAS_LASX)
+         {
+           if (elt >= 16)
+             {
+@@ -9325,7 +9329,7 @@ loongarch_expand_vector_extract (rtx target, rtx vec, int elt)
+       break;
+ 
+     case E_V16HImode:
+-      if (TARGET_LASX)
++      if (ISA_HAS_LASX)
+         {
+           if (elt >= 8)
+             {
+diff --git a/src/gcc/config/loongarch/loongarch.opt b/src/gcc/config/loongarch/loongarch.opt
+index 1543d40f4..7f98cabbc 100644
+--- a/src/gcc/config/loongarch/loongarch.opt
++++ b/src/gcc/config/loongarch/loongarch.opt
+@@ -27,22 +27,12 @@
+ ; <http://www.gnu.org/licenses/>.
+ ;
+ 
+-; Variables (macros) that should be exported by loongarch.opt:
+-;   la_opt_switches,
+-;   la_opt_abi_base, la_opt_abi_ext,
+-;   la_opt_cpu_arch, la_opt_cpu_tune,
+-;   la_opt_fpu,
+-;   la_cmodel.
+-
+ HeaderInclude
+ config/loongarch/loongarch-opts.h
+ 
+ HeaderInclude
+ config/loongarch/loongarch-str.h
+ 
+-Variable
+-HOST_WIDE_INT la_opt_switches = 0
+-
+ ; ISA related options
+ ;; Base ISA
+ Enum
+@@ -59,7 +49,7 @@ Name(isa_ext_fpu) Type(int)
+ FPU types of LoongArch:
+ 
+ EnumValue
+-Enum(isa_ext_fpu) String(none) Value(ISA_EXT_NOFPU)
++Enum(isa_ext_fpu) String(none) Value(ISA_EXT_NONE)
+ 
+ EnumValue
+ Enum(isa_ext_fpu) String(32) Value(ISA_EXT_FPU32)
+@@ -68,31 +58,48 @@ EnumValue
+ Enum(isa_ext_fpu) String(64) Value(ISA_EXT_FPU64)
+ 
+ mfpu=
+-Target RejectNegative Joined ToLower Enum(isa_ext_fpu) Var(la_opt_fpu) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined ToLower Enum(isa_ext_fpu) Var(la_opt_fpu) Init(M_OPT_UNSET)
+ -mfpu=FPU	Generate code for the given FPU.
+ 
+ mfpu=0
+ Target RejectNegative Alias(mfpu=,none)
+ 
+ msoft-float
+-Target Driver RejectNegative Var(la_opt_switches) Mask(FORCE_SOFTF) Negative(msingle-float)
++Target Driver Defer Var(la_deferred_options) RejectNegative Negative(msingle-float)
+ Prevent the use of all hardware floating-point instructions.
+ 
+ msingle-float
+-Target Driver RejectNegative Var(la_opt_switches) Mask(FORCE_F32) Negative(mdouble-float)
++Target Driver Defer Var(la_deferred_options) RejectNegative Negative(mdouble-float)
+ Restrict the use of hardware floating-point instructions to 32-bit operations.
+ 
+ mdouble-float
+-Target Driver RejectNegative Var(la_opt_switches) Mask(FORCE_F64) Negative(msoft-float)
++Target Driver Defer Var(la_deferred_options) RejectNegative Negative(msoft-float)
+ Allow hardware floating-point instructions to cover both 32-bit and 64-bit operations.
+ 
++Enum
++Name(isa_ext_simd) Type(int)
++SIMD extension levels of LoongArch:
++
++EnumValue
++Enum(isa_ext_simd) String(none) Value(ISA_EXT_NONE)
++
++EnumValue
++Enum(isa_ext_simd) String(lsx) Value(ISA_EXT_SIMD_LSX)
++
++EnumValue
++Enum(isa_ext_simd) String(lasx) Value(ISA_EXT_SIMD_LASX)
++
++msimd=
++Target RejectNegative Joined ToLower Enum(isa_ext_simd) Var(la_opt_simd) Init(M_OPT_UNSET)
++-msimd=SIMD	Generate code for the given SIMD extension.
++
+ mlsx
+-Target Var(la_opt_switches) Mask(LSX) Negative(mlasx)
+-Enable LoongArch SIMD Extension (LSX).
++Target Driver Defer Var(la_deferred_options)
++Enable LoongArch SIMD Extension (LSX, 128-bit).
+ 
+ mlasx
+-Target Var(la_opt_switches) Mask(LASX) Negative(mlsx)
+-Enable LoongArch Advanced SIMD Extension (LASX).
++Target Driver Defer Var(la_deferred_options)
++Enable LoongArch Advanced SIMD Extension (LASX, 256-bit).
+ 
+ ;; Base target models (implies ISA & tune parameters)
+ Enum
+@@ -121,11 +128,11 @@ EnumValue
+ Enum(cpu_type) String(2k1500) Value(CPU_2K1500)
+ 
+ march=
+-Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_arch) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_arch) Init(M_OPT_UNSET)
+ -march=PROCESSOR	Generate code for the given PROCESSOR ISA.
+ 
+ mtune=
+-Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_tune) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_tune) Init(M_OPT_UNSET)
+ -mtune=PROCESSOR	Generate optimized code for PROCESSOR.
+ 
+ 
+@@ -147,16 +154,17 @@ EnumValue
+ Enum(abi_base) String(lp64s) Value(ABI_BASE_LP64S)
+ 
+ mabi=
+-Target RejectNegative Joined ToLower Enum(abi_base) Var(la_opt_abi_base) Init(M_OPTION_NOT_SEEN)
++Target RejectNegative Joined ToLower Enum(abi_base) Var(la_opt_abi_base) Init(M_OPT_UNSET)
+ -mabi=BASEABI	Generate code that conforms to the given BASEABI.
+ 
+ ;; Legacy option: -mabi=lp64
+ mabi=lp64
+-Target Driver RejectNegative Undocumented
++Target RejectNegative Mask(LP64)
++-mabi=lp64	Legacy option that enables the lp64 integer ABI.
+ 
+ ;; ABI Extension
+ Variable
+-int la_opt_abi_ext = M_OPTION_NOT_SEEN
++int la_opt_abi_ext = M_OPT_UNSET
+ 
+ mbranch-cost=
+ Target RejectNegative Joined UInteger Var(loongarch_branch_cost)
+@@ -227,5 +235,5 @@ EnumValue
+ Enum(cmodel) String(extreme) Value(CMODEL_EXTREME)
+ 
+ mcmodel=
+-Target RejectNegative Joined Enum(cmodel) Var(la_opt_cmodel) Init(CMODEL_NORMAL)
++Target RejectNegative Joined Enum(cmodel) Var(la_opt_cmodel) Init(M_OPT_UNSET)
+ Specify the code model.
+diff --git a/src/gcc/config/loongarch/t-linux b/src/gcc/config/loongarch/t-linux
+index b368de028..906f27840 100644
+--- a/src/gcc/config/loongarch/t-linux
++++ b/src/gcc/config/loongarch/t-linux
+@@ -33,7 +33,7 @@ gen_mlib_spec = $(if $(word 2,$1),\
+ 		%{$(firstword $1):$(patsubst %,-%,$(wordlist 2,$(words $1),$1))})
+ 
+ # clean up the result of DRIVER_SELF_SPEC to avoid conflict
+-lib_build_self_spec  = %<march=* %<mtune=* %<mcmodel=* %<mfpu=* %<mlsx %<mlasx
++lib_build_self_spec  = %<march=* %<mtune=* %<mcmodel=* %<mfpu=* %<msimd=
+ 
+ # build libraries with -mstrict-align by default
+ lib_build_self_spec += -mstrict-align
+-- 
+2.31.1
+

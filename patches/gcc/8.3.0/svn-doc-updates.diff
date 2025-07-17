@@ -1,0 +1,6 @@
+# DP: updates from the 6 branch upto 2017xxyy (documentation).
+
+svn diff svn://gcc.gnu.org/svn/gcc/tags/gcc_7_1_0_release svn://gcc.gnu.org/svn/gcc/branches/gcc-5-branch \
+	| sed -r 's,^--- (\S+)\t(\S+)(.*)$,--- a/src/\1\t\2,;s,^\+\+\+ (\S+)\t(\S+)(.*)$,+++ b/src/\1\t\2,' \
+	| awk '/^Index:.*\.texi/ {skip=0; print; next} /^Index:/ {skip=1; next} skip==0'
+

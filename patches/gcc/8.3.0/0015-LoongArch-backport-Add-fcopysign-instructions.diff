@@ -1,0 +1,117 @@
+From 9d007056b11e04de1f73cab182e906c11c6621be Mon Sep 17 00:00:00 2001
+From: qijingwen <qijingwen@loongson.cn>
+Date: Mon, 19 Dec 2022 17:34:45 +0800
+Subject: [PATCH 13/28] LoongArch backport: Add fcopysign instructions
+
+Add fcopysign.{s,d} with the names copysign{sf,df}3 so GCC will expand
+__builtin_copysign{f,} to a single instruction.
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.md (UNSPEC_FCOPYSIGN): New unspec.
+	(type): Add fcopysign.
+	(copysign<mode>3): New instruction template.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/fcopysign.c: New test.
+
+Change-Id: I00ebc4886726f3c07d1f09043eeae9e9d4e9501b
+---
+ src/gcc/config/loongarch/loongarch.md         | 34 ++++++++++++++++++-
+ .../gcc.target/loongarch/fcopysign.c          | 17 ++++++++++
+ 2 files changed, 50 insertions(+), 1 deletion(-)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/fcopysign.c
+
+diff --git a/src/gcc/config/loongarch/loongarch.md b/src/gcc/config/loongarch/loongarch.md
+index 9b0ba9c38..2c667107e 100644
+--- a/src/gcc/config/loongarch/loongarch.md
++++ b/src/gcc/config/loongarch/loongarch.md
+@@ -40,6 +40,7 @@
+   ;; Floating point unspecs.
+   UNSPEC_FRINT
+   UNSPEC_FCLASS
++  UNSPEC_FCOPYSIGN
+ 
+   ;; Override return address for exception handling.
+   UNSPEC_EH_RETURN
+@@ -215,6 +216,7 @@
+ ;; fabs		floating point absolute value
+ ;; fneg		floating point negation
+ ;; fcmp		floating point compare
++;; fcopysign	floating point copysign
+ ;; fcvt		floating point convert
+ ;; fsqrt	floating point square root
+ ;; frsqrt       floating point reciprocal square root
+@@ -227,7 +229,7 @@
+   "unknown,branch,jump,call,load,fpload,fpidxload,store,fpstore,fpidxstore,
+    prefetch,prefetchx,condmove,mgtf,mftg,const,arith,logical,
+    shift,slt,signext,clz,trap,imul,idiv,move,
+-   fmove,fadd,fmul,fmadd,fdiv,frdiv,fabs,fneg,fcmp,fcvt,fsqrt,
++   fmove,fadd,fmul,fmadd,fdiv,frdiv,fabs,fneg,fcmp,fcopysign,fcvt,fsqrt,
+    frsqrt,accext,accmod,multi,atomic,syncloop,nop,ghost,
+    simd_div,simd_fclass,simd_flog2,simd_fadd,simd_fcvt,simd_fmul,simd_fmadd,
+    simd_fdiv,simd_bitins,simd_bitmov,simd_insert,simd_sld,simd_mul,simd_fcmp,
+@@ -780,6 +782,36 @@
+   [(set_attr "type" "imul")
+    (set_attr "mode" "SI")])
+ 
++
++;;  ....................
++;;
++;;     FLOATING POINT COPYSIGN
++;;
++;;  ....................
++
++;;     FLOATING POINT COPYSIGN
++;;
++;;  ....................
++
++(define_insn "copysign<mode>3"
++  [(set (match_operand:ANYF 0 "register_operand" "=f")
++       (unspec:ANYF [(match_operand:ANYF 1 "register_operand" "f")
++                     (match_operand:ANYF 2 "register_operand" "f")]
++                    UNSPEC_FCOPYSIGN))]
++  "TARGET_HARD_FLOAT"
++  "fcopysign.<fmt>\t%0,%1,%2"
++  [(set_attr "type" "fcopysign")
++   (set_attr "mode" "<UNITMODE>")])
++
++
++;;
++
++
++
++
++
++
++
+ ;;
+ ;;  ....................
+ ;;
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/fcopysign.c b/src/gcc/testsuite/gcc.target/loongarch/fcopysign.c
+new file mode 100644
+index 000000000..fdb405c8e
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/fcopysign.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile } */
++/* { dg-options "-mdouble-float" } */
++/* { dg-final { scan-assembler "fcopysign\\.s" } } */
++/* { dg-final { scan-assembler "fcopysign\\.d" } } */
++
++double
++my_copysign (double a, double b)
++{
++  return __builtin_copysign (a, b);
++}
++
++float
++my_copysignf (float a, float b)
++{
++  return __builtin_copysignf (a, b);
++}
++
+-- 
+2.31.1
+

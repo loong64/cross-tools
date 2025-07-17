@@ -1,0 +1,183 @@
+From 2e0751c296e4a4480fab8692dae559de7a5a510a Mon Sep 17 00:00:00 2001
+From: Jiahao Xu <xujiahao@loongson.cn>
+Date: Fri, 26 Aug 2022 15:52:47 +0800
+Subject: [PATCH 03/28] Implement function loongarch_emit_swsqrtsf
+
+The function loongarch_emit_swsqrtsf calculate the approximate value of rsqrtf,
+which is faster but not safe.It is only used when option "-funsafe-math-optimizations"
+is turned on.
+
+Change-Id: I21796bb7df779464509549bbfc84e45b72d690b2
+---
+ src/gcc/config/loongarch/lasx.md            | 13 +++++
+ src/gcc/config/loongarch/loongarch-protos.h |  1 +
+ src/gcc/config/loongarch/loongarch.c        | 62 +++++++++++++++++++++
+ src/gcc/config/loongarch/loongarch.md       | 13 +++++
+ src/gcc/config/loongarch/lsx.md             | 13 +++++
+ 5 files changed, 102 insertions(+)
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index 51989b3bf..6f9bc7c9c 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -1579,6 +1579,19 @@
+   [(set_attr "type" "simd_fdiv")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_expand "rsqrt<mode>2"
++  [(set (match_operand:FLASX 0 "register_operand" "=f")
++    (unspec:FLASX [(match_operand:FLASX 1 "register_operand" "f")]
++             UNSPEC_LASX_XVFRSQRT))]
++  "ISA_HAS_LASX && flag_unsafe_math_optimizations"
++{
++  if (<MODE>mode == V8SFmode)
++    loongarch_emit_swrsqrtsf (operands[0], operands[1], V8SFmode);
++  else
++    emit_insn (gen_lasx_xvfrsqrt_d (operands[0], operands[1]));
++  DONE;
++})
++
+ (define_insn "lasx_xvftint_s_<ilasxfmt>_<flasxfmt>"
+   [(set (match_operand:<VIMODE256> 0 "register_operand" "=f")
+ 	(unspec:<VIMODE256> [(match_operand:FLASX 1 "register_operand" "f")]
+diff --git a/src/gcc/config/loongarch/loongarch-protos.h b/src/gcc/config/loongarch/loongarch-protos.h
+index 3ca4917c5..3dfcf2e0d 100644
+--- a/src/gcc/config/loongarch/loongarch-protos.h
++++ b/src/gcc/config/loongarch/loongarch-protos.h
+@@ -205,4 +205,5 @@ extern tree loongarch_builtin_vectorized_function (unsigned int, tree, tree);
+ extern rtx loongarch_gen_const_int_vector_shuffle (machine_mode, int);
+ extern tree loongarch_build_builtin_va_list (void);
+ extern rtx loongarch_build_signbit_mask (machine_mode, bool, bool);
++extern void loongarch_emit_swrsqrtsf (rtx, rtx, machine_mode);
+ #endif /* ! GCC_LARCH_PROTOS_H */
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index 35a5034c2..85fe76f82 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -10091,6 +10091,68 @@ loongarch_build_signbit_mask (machine_mode mode, bool vect, bool invert)
+   return force_reg (vec_mode, v);
+ }
+ 
++/* Emit code for rsqrt calculation.  */
++
++void loongarch_emit_swrsqrtsf (rtx res, rtx a, machine_mode mode)
++{
++  rtx x0, e0, e1, e2, e3, e4, e5, e6, e7, mhalf, mmagic, monehalf, mone;
++  machine_mode imode = SImode;
++  REAL_VALUE_TYPE r;
++
++  x0 = gen_reg_rtx (mode);
++  e0 = gen_reg_rtx (mode);
++  e1 = gen_reg_rtx (mode);
++  e2 = gen_reg_rtx (mode);
++  e3 = gen_reg_rtx (mode);
++  e4 = gen_reg_rtx (mode);
++  e5 = gen_reg_rtx (mode);
++  e6 = gen_reg_rtx (mode);
++  e7 = gen_reg_rtx (mode);
++
++  real_arithmetic (&r, ABS_EXPR, &dconsthalf, NULL);
++  mhalf = const_double_from_real_value (r, SFmode);
++
++  real_arithmetic (&r, PLUS_EXPR, &dconsthalf, &dconst1);
++  monehalf = const_double_from_real_value (r, SFmode);
++
++  mone = GEN_INT (0x1);
++  mmagic = GEN_INT (0x5f3759df);
++
++  if (VECTOR_MODE_P (mode))
++    {
++      imode = LASX_SUPPORTED_MODE_P(mode) ? V8SImode : V4SImode;
++      mhalf = loongarch_build_const_vector (mode, true, mhalf);
++      mmagic = loongarch_build_const_vector (imode, true, mmagic);
++      monehalf = loongarch_build_const_vector (mode, true, monehalf);
++      mone = loongarch_build_const_vector (imode, true, mone);
++    }
++
++  rtx x1 = gen_reg_rtx (imode);
++  rtx x2 = gen_reg_rtx (imode);
++
++  /* x2 = rsqrt(a) estimate */
++  emit_insn (gen_rtx_SET (x1, gen_rtx_ASHIFTRT (imode, gen_lowpart (imode, a), mone)));
++  mhalf = force_reg (mode, mhalf);
++  emit_insn (gen_rtx_SET (x0, gen_rtx_MULT (mode, mhalf, a)));
++  mmagic = force_reg (imode, mmagic);
++  emit_insn (gen_rtx_SET (x2, gen_rtx_MINUS (imode, mmagic, x1)));
++
++  /* rsqrt(a) =  rsqrtss(a) * (1.5 - 0.5 * a * rsqrtss(a) * rsqrtss(a)) */
++  emit_insn (gen_rtx_SET (e0, gen_rtx_MULT (mode, gen_lowpart (mode, x2), gen_lowpart (mode, x2))));
++  monehalf = force_reg (mode, monehalf);
++  emit_insn (gen_rtx_SET (e1, gen_rtx_FMA (mode, gen_rtx_NEG(mode, e0), x0, monehalf)));
++  emit_insn (gen_rtx_SET (e2, gen_rtx_MULT (mode, gen_lowpart (mode, x2), e1)));
++
++  /* 2nd iteration */
++  emit_insn (gen_rtx_SET (e3, gen_rtx_MULT (mode, gen_lowpart (mode, e2), gen_lowpart (mode, e2))));
++  emit_insn (gen_rtx_SET (e4, gen_rtx_FMA (mode, gen_rtx_NEG(mode, e3), x0, monehalf)));
++  emit_insn (gen_rtx_SET (e5, gen_rtx_MULT (mode, gen_lowpart (mode, e2), e4)));
++
++  /* 3rd iteration */
++  emit_insn (gen_rtx_SET (e6, gen_rtx_MULT (mode, gen_lowpart (mode, e5), gen_lowpart (mode, e5))));
++  emit_insn (gen_rtx_SET (e7, gen_rtx_FMA (mode, gen_rtx_NEG(mode, e6), x0, monehalf)));
++  emit_insn (gen_rtx_SET (res, gen_rtx_MULT (mode, gen_lowpart (mode, e5), e7)));
++}
+ 
+ 
+ /* Initialize the GCC target structure.  */
+diff --git a/src/gcc/config/loongarch/loongarch.md b/src/gcc/config/loongarch/loongarch.md
+index 7ac46e753..ba2857def 100644
+--- a/src/gcc/config/loongarch/loongarch.md
++++ b/src/gcc/config/loongarch/loongarch.md
+@@ -62,6 +62,9 @@
+   ;; CRC
+   UNSPEC_CRC
+   UNSPEC_CRCC
++
++  ;; RSQRT
++  UNSPEC_RSQRT
+ ])
+ 
+ (define_c_enum "unspecv" [
+@@ -986,6 +989,16 @@
+    (set_attr "mode" "<UNITMODE>")
+    (set_attr "insn_count" "1")])
+ 
++(define_expand "rsqrtsf2"
++  [(set (match_operand:SF 0 "register_operand")
++    (unspec:SF [(match_operand:SF 1 "register_operand")]
++           UNSPEC_RSQRT))]
++  "flag_unsafe_math_optimizations && flag_rounding_math"
++{
++  loongarch_emit_swrsqrtsf (operands[0], operands[1], SFmode);
++  DONE;
++})
++
+ (define_insn "*rsqrt<mode>a"
+   [(set (match_operand:ANYF 0 "register_operand" "=f")
+ 	(div:ANYF (match_operand:ANYF 1 "const_1_operand" "")
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index fa7943be0..955359ba3 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -1482,6 +1482,19 @@
+   [(set_attr "type" "simd_fdiv")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_expand "rsqrt<mode>2"
++  [(set (match_operand:FLSX 0 "register_operand" "=f")
++    (unspec:FLSX [(match_operand:FLSX 1 "register_operand" "f")]
++             UNSPEC_LSX_VFRSQRT))]
++  "ISA_HAS_LSX && flag_unsafe_math_optimizations"
++{
++  if (<MODE>mode == V4SFmode)
++    loongarch_emit_swrsqrtsf (operands[0], operands[1], V4SFmode);
++  else
++    emit_insn (gen_lsx_vfrsqrt_d (operands[0], operands[1]));
++  DONE;
++})
++
+ (define_insn "lsx_vftint_s_<ilsxfmt>_<flsxfmt>"
+   [(set (match_operand:<VIMODE> 0 "register_operand" "=f")
+ 	(unspec:<VIMODE> [(match_operand:FLSX 1 "register_operand" "f")]
+-- 
+2.31.1
+

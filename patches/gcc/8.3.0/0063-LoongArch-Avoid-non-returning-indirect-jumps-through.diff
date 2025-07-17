@@ -1,0 +1,61 @@
+From c768c3189d31f2ec29acebe2d8c668b822b1f49d Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Mon, 9 Sep 2024 10:19:30 +0800
+Subject: [PATCH 2/3] LoongArch: Avoid non-returning indirect jumps through $ra
+ [PR110136]
+
+Micro-architecture unconditionally treats a "jr $ra" as "return from subroutine",
+hence doing "jr $ra" would interfere with both subroutine return prediction and
+the more general indirect branch prediction.
+
+Therefore, a problem like PR110136 can cause a significant increase in branch error
+prediction rate and affect performance. The same problem exists with "indirect_jump".
+
+gcc/ChangeLog:
+
+        PR target/110136
+        * config/loongarch/loongarch.md: Modify the register constraints for template
+        "jumptable" and "indirect_jump" from "r" to "e".
+
+Change-Id: Id1d24df50aa3ccb83a026db63b6b106f43c20b5d
+Co-authored-by: Andrew Pinski <apinski@marvell.com>
+---
+ src/gcc/config/loongarch/loongarch.md | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/gcc/config/loongarch/loongarch.md b/src/gcc/config/loongarch/loongarch.md
+index d9deab3f0..ffcbbe2c7 100644
+--- a/src/gcc/config/loongarch/loongarch.md
++++ b/src/gcc/config/loongarch/loongarch.md
+@@ -2849,6 +2849,10 @@
+ }
+   [(set_attr "type" "branch")])
+ 
++;; Micro-architecture unconditionally treats a "jr $ra" as "return from subroutine",
++;; non-returning indirect jumps through $ra would interfere with both subroutine
++;; return prediction and the more general indirect branch prediction.
++
+ (define_expand "indirect_jump"
+   [(set (pc) (match_operand 0 "register_operand"))]
+   ""
+@@ -2859,7 +2863,7 @@
+ })
+ 
+ (define_insn "indirect_jump<mode>"
+-  [(set (pc) (match_operand:P 0 "register_operand" "r"))]
++  [(set (pc) (match_operand:P 0 "register_operand" "e"))]
+   ""
+   "jr\t%0"
+   [(set_attr "type" "jump")
+@@ -2882,7 +2886,7 @@
+ 
+ (define_insn "tablejump<mode>"
+   [(set (pc)
+-	(match_operand:P 0 "register_operand" "r"))
++	(match_operand:P 0 "register_operand" "e"))
+    (use (label_ref (match_operand 1 "" "")))]
+   ""
+   "jr\t%0"
+-- 
+2.39.3
+

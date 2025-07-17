@@ -1,0 +1,24 @@
+From 702014ca595a8fd137f6c68651df6c6658386312 Mon Sep 17 00:00:00 2001
+From: Jiahao Xu <xujiahao@loongson.cn>
+Date: Thu, 8 Dec 2022 17:27:00 +0800
+Subject: [PATCH 14/28] Fix bug for peephole in lasx.md
+
+Change-Id: Ia6e3ae789274dd87807602a7c7efbd2538509598
+---
+ src/gcc/config/loongarch/lasx.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index aa0d9d185..aefc1e876 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -5068,5 +5068,5 @@
+                             (const_int 6) (const_int 7)]))))]
+   "ISA_HAS_LASX && rtx_equal_p (operands[1], operands[3])"
+ {
+-  return "xvpermi.d\t%u1,%u1,0xd8\n\txvfcvtl.d.s\t%u0,%u1\n\txvfcvth.d.s\t%u1,%u1";
++  return "xvpermi.d\t%u2,%u1,0xd8\n\txvfcvtl.d.s\t%u0,%u2\n\txvfcvth.d.s\t%u2,%u2";
+ })
+-- 
+2.31.1
+

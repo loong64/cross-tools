@@ -1,0 +1,13 @@
+# DP: Fix the location of target's libs in cross-build for biarch
+
+--- a/src/config-ml.in
++++ b/src/config-ml.in
+@@ -891,6 +915,8 @@
+ 	  case $arg in
+ 	  -[BIL]"${ML_POPDIR}"/*)
+ 	    GDC_="${GDC_}"`echo "X${arg}" | sed -n "s/X\\(-[BIL]${popdir_rx}\\).*/\\1/p"`/${ml_dir}`echo "X${arg}" | sed -n "s/X-[BIL]${popdir_rx}\\(.*\\)/\\1/p"`' ' ;;
++	  -B*/lib/)
++	    GDC_="${GDC_}"`echo "X${arg}" | sed -n "$FILTER_"`' ' ;;
+ 	  "${ML_POPDIR}"/*)
+ 	    GDC_="${GDC_}"`echo "X${arg}" | sed -n "s/X\\(${popdir_rx}\\).*/\\1/p"`/${ml_dir}`echo "X${arg}" | sed -n "s/X${popdir_rx}\\(.*\\)/\\1/p"`' ' ;;
+ 	  *)

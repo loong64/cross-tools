@@ -1,0 +1,48 @@
+# DP: DWARF2 EH unwinding support for AMD x86-64 and x86 KFreeBSD.
+
+Index: b/src/libgcc/config.host
+===================================================================
+--- a/src/libgcc/config.host
++++ b/src/libgcc/config.host
+@@ -647,7 +647,13 @@ i[34567]86-*-linux*)
+ 	tm_file="${tm_file} i386/elf-lib.h"
+ 	md_unwind_header=i386/linux-unwind.h
+ 	;;
+-i[34567]86-*-kfreebsd*-gnu | i[34567]86-*-gnu* | i[34567]86-*-kopensolaris*-gnu)
++i[34567]86-*-kfreebsd*-gnu)
++	extra_parts="$extra_parts crtprec32.o crtprec64.o crtprec80.o crtfastmath.o"
++	tmake_file="${tmake_file} i386/t-crtpc t-crtfm i386/t-crtstuff t-dfprules"
++	tm_file="${tm_file} i386/elf-lib.h"
++	md_unwind_header=i386/freebsd-unwind.h
++	;;
++i[34567]86-*-gnu* | i[34567]86-*-kopensolaris*-gnu)
+ 	extra_parts="$extra_parts crtprec32.o crtprec64.o crtprec80.o crtfastmath.o"
+ 	tmake_file="${tmake_file} i386/t-crtpc t-crtfm i386/t-crtstuff t-dfprules"
+ 	tm_file="${tm_file} i386/elf-lib.h"
+@@ -662,6 +668,7 @@ x86_64-*-kfreebsd*-gnu)
+ 	extra_parts="$extra_parts crtprec32.o crtprec64.o crtprec80.o crtfastmath.o"
+ 	tmake_file="${tmake_file} i386/t-crtpc t-crtfm i386/t-crtstuff t-dfprules"
+ 	tm_file="${tm_file} i386/elf-lib.h"
++	md_unwind_header=i386/freebsd-unwind.h
+ 	;;
+ i[34567]86-pc-msdosdjgpp*)
+ 	;;
+Index: b/src/libgcc/config/i386/freebsd-unwind.h
+===================================================================
+--- a/src/libgcc/config/i386/freebsd-unwind.h
++++ b/src/libgcc/config/i386/freebsd-unwind.h
+@@ -26,6 +26,8 @@ see the files COPYING3 and COPYING.RUNTI
+ /* Do code reading to identify a signal frame, and set the frame
+    state data appropriately.  See unwind-dw2.c for the structs. */
+ 
++#ifndef inhibit_libc
++
+ #include <sys/types.h>
+ #include <signal.h>
+ #include <unistd.h>
+@@ -210,3 +212,5 @@ x86_freebsd_fallback_frame_state
+   return _URC_NO_REASON;
+ }
+ #endif /* ifdef __x86_64__  */
++
++#endif /* ifndef inhibit_libc */

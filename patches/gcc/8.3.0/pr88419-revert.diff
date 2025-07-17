@@ -1,0 +1,47 @@
+# DP: Revert the fix for PC c++/88419, causing PR c++/89906.
+
+2019-03-08  Jason Merrill  <jason@redhat.com>
+ 
+	PR c++/88419 - C++17 ICE with class template arg deduction.
+	* pt.c (make_template_placeholder): Set TYPE_CANONICAL after
+	CLASS_PLACEHOLDER_TEMPLATE.
+
+--- a/src/gcc/cp/pt.c
++++ b/src/gcc/cp/pt.c
+@@ -26002,10 +26002,8 @@
+ tree
+ make_template_placeholder (tree tmpl)
+ {
+-  tree t = make_auto_1 (DECL_NAME (tmpl), false);
++  tree t = make_auto_1 (DECL_NAME (tmpl), true);
+   CLASS_PLACEHOLDER_TEMPLATE (t) = tmpl;
+-  /* Our canonical type depends on the placeholder.  */
+-  TYPE_CANONICAL (t) = canonical_type_parameter (t);
+   return t;
+ }
+ 
+--- a/src/gcc/testsuite/g++.dg/cpp1z/class-deduction62.C
++++ b/src/gcc/testsuite/g++.dg/cpp1z/class-deduction62.C
+@@ -1,22 +0,0 @@
+-// PR c++/88419
+-// { dg-do compile { target c++17 } }
+-
+-template<class> struct ref_view {
+-  template<class T> ref_view(T&&);
+-};
+-
+-template<class R> ref_view(R&) -> ref_view<R>;
+-
+-struct ref_fn {
+-  template<class R> auto operator()(R r) const
+-    noexcept(noexcept(ref_view{r}));
+-};
+-
+-template<class R> struct indirect_view {
+-  indirect_view(R);
+-};
+-
+-struct indirect_fn {
+-  template<class R> auto operator()(R r) const
+-    noexcept(noexcept(indirect_view{r}));
+-};

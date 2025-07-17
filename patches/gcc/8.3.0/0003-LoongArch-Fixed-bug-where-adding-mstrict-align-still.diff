@@ -1,0 +1,80 @@
+From edf490632ac530dceb11f620eb73d11c7ecda41a Mon Sep 17 00:00:00 2001
+From: qijingwen <qijingwen@loongson.cn>
+Date: Wed, 7 Sep 2022 17:09:15 +0800
+Subject: [PATCH 01/28] LoongArch: Fixed bug where adding -mstrict-align still
+ generated potentially misaligned vector operations.
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.c:
+	Define hook TARGET_VECTORIZE_SUPPORT_VECTOR_MISALIGNMENT.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/strict-align.c: Newfiles.
+
+Change-Id: Ie7f355234f6284327275525b4a3b60c474b7aae6
+---
+ src/gcc/config/loongarch/loongarch.c           | 18 ++++++++++++++++++
+ .../gcc.target/loongarch/strict-align.c        | 13 +++++++++++++
+ 2 files changed, 31 insertions(+)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/strict-align.c
+
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index 6c7bde8bb..35a5034c2 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -3384,6 +3384,22 @@ loongarch_add_stmt_cost (void *data, int count, enum vect_cost_for_stmt kind,
+   return retval;
+ }
+ 
++static bool
++loongarch_builtin_support_vector_misalignment(machine_mode mode, const_tree type,
++					      int misalignment, bool is_packed)
++{
++  if ((ISA_HAS_LSX || ISA_HAS_LASX) && STRICT_ALIGNMENT)
++    {
++      if (optab_handler (movmisalign_optab, mode) == CODE_FOR_nothing)
++        return false;
++      if (misalignment == -1)
++        return false;
++    }
++  return default_builtin_support_vector_misalignment (mode, type, misalignment,
++						      is_packed);
++}
++
++
+ /* Implement TARGET_ADDRESS_COST.  */
+ 
+ static int
+@@ -10131,6 +10147,8 @@ loongarch_build_signbit_mask (machine_mode mode, bool vect, bool invert)
+ #undef TARGET_VECTORIZE_ADD_STMT_COST
+ #define TARGET_VECTORIZE_ADD_STMT_COST loongarch_add_stmt_cost
+ 
++#undef TARGET_VECTORIZE_SUPPORT_VECTOR_MISALIGNMENT
++#define TARGET_VECTORIZE_SUPPORT_VECTOR_MISALIGNMENT loongarch_builtin_support_vector_misalignment
+ #undef TARGET_MODE_REP_EXTENDED
+ #define TARGET_MODE_REP_EXTENDED loongarch_mode_rep_extended
+ 
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/strict-align.c b/src/gcc/testsuite/gcc.target/loongarch/strict-align.c
+new file mode 100644
+index 000000000..bcad2b84f
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/strict-align.c
+@@ -0,0 +1,13 @@
++/* { dg-do compile } */
++/* { dg-options "-Ofast -mstrict-align -mlasx" } */
++/* { dg-final { scan-assembler-not "vfadd.s" } } */
++
++void
++foo (float* restrict x, float* restrict y)
++{
++  x[0] = x[0] + y[0];
++  x[1] = x[1] + y[1];
++  x[2] = x[2] + y[2];
++  x[3] = x[3] + y[3];
++}
++
+-- 
+2.31.1
+

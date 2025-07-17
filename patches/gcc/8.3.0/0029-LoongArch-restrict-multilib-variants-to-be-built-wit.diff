@@ -1,0 +1,54 @@
+From cee0552ee8f3162c2549f6c4f2e33190f9748167 Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Thu, 16 Feb 2023 20:47:27 +0800
+Subject: [PATCH 28/28] LoongArch: restrict multilib variants to be built with
+ ${with_multilib_list}.
+
+This patch only affects loongarch-targeted canadian builds.  In this case,
+the runtime libraries are built with an "exotic" cross compiler, whose
+--print-multi-lib output is not controlled by --with-multilib-list, but
+still decides the set of multilib variant to be built.
+
+A case clause for loongarch is added to filter out the variants not enabled
+by --with-multilib-list.
+
+* config.ml.in: add case clause for loongarch targets.
+
+Change-Id: Id5d5a4945d12626bb578b454633960a8bec74ead
+---
+ src/config-ml.in | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/config-ml.in b/src/config-ml.in
+index 55c71a8ef..80a968cbd 100644
+--- a/src/config-ml.in
++++ b/src/config-ml.in
+@@ -301,6 +301,25 @@ arm-*-*)
+ 	  done
+ 	fi
+ 	;;
++loongarch*-*-*)
++	old_multidirs="${multidirs}"
++	multidirs=""
++	for m in $(echo "${with_multilib_list}" | sed 's/,/ /g'); do
++	  #
++	  # Format of ${with_multilib_list} elements:
++	  #    abi_base[/abi_ext[/extras]]
++	  #
++	  m_base=$(echo "${m}" | sed 's@^\([^/]*\)/.*@\1@')
++	  m_ext=$(echo "${m}" | sed 's@^[^/]*\(/\|$\)\([^/]*\).*@\2@')
++	  [ -z "${m_ext}" ] && m_ext=base
++	  for x in ${old_multidirs}; do
++	    case "$x" in
++	      ${m_ext}/${m_base} ) multidirs="${multidirs} ${x}" ;;
++	      *) : ;;
++	    esac
++	  done
++	done
++	;;
+ m68*-*-*)
+ 	if [ x$enable_softfloat = xno ]
+ 	then
+-- 
+2.31.1
+

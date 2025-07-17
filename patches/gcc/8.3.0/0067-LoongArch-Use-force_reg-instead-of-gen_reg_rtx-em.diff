@@ -1,0 +1,210 @@
+From d6839826e1c4d355de904caeb1af5ce4d5833af5 Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Sat, 16 Nov 2024 10:57:10 +0800
+Subject: [PATCH v1 2/2] LoongArch: Use force_reg instead of gen_reg_rtx +
+ emit_move_insn in vec_init expander [PR113033]
+
+Jakub says:
+
+    Then that seems like a bug in the loongarch vec_init pattern(s).
+    Those really don't have a predicate in any of the backends on the
+    input operand, so they need to force_reg it if it is something it
+    can't handle. I've looked e.g. at i386 vec_init and that is exactly
+    what it does, see the various tests + force_reg calls in
+    ix86_expand_vector_init*.
+
+So replace gen_reg_rtx + emit_move_insn with force_reg to fix PR 113033.
+
+gcc/ChangeLog:
+
+        PR target/113033
+        * config/loongarch/loongarch.c
+        (loongarch_expand_vector_init_same): Replace gen_reg_rtx +
+        emit_move_insn with force_reg.
+        (loongarch_expand_vector_init): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+        PR target/113033
+        * gcc.target/loongarch/pr113033.c: New test.
+        * g++.target/loongarch/pr113033.C: New test.
+
+Change-Id: I581745c1e3d7eebc05fcd0213fd703abe1229b7c
+---
+ src/gcc/config/loongarch/loongarch.c          | 36 ++++++-------------
+ .../testsuite/g++.target/loongarch/pr113033.C | 10 ++++++
+ .../testsuite/gcc.target/loongarch/pr113033.c | 24 +++++++++++++
+ 3 files changed, 44 insertions(+), 26 deletions(-)
+ create mode 100644 src/gcc/testsuite/g++.target/loongarch/pr113033.C
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/pr113033.c
+
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index b722a307b..ed2286925 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -9794,7 +9794,6 @@ loongarch_expand_vector_init_same (rtx target, rtx vals, unsigned nvar)
+ 	  gcc_unreachable ();
+ 	}
+     }
+-  temp = gen_reg_rtx (imode);
+   if (imode == GET_MODE (same))
+     temp2 = same;
+   else if (GET_MODE_SIZE (imode) >= UNITS_PER_WORD)
+@@ -9819,7 +9818,7 @@ loongarch_expand_vector_init_same (rtx target, rtx vals, unsigned nvar)
+       else
+ 	temp2 = lowpart_subreg (imode, same, GET_MODE (same));
+     }
+-  emit_move_insn (temp, temp2);
++  temp = force_reg (imode, temp2);
+ 
+   switch (vmode)
+     {
+@@ -10041,35 +10040,29 @@ loongarch_expand_vector_init (rtx target, rtx vals)
+ 			 to reduce the number of instructions.  */
+ 		      if (i == 1)
+ 			{
+-			  op0 = gen_reg_rtx (imode);
+-			  emit_move_insn (op0, val_hi[0]);
+-			  op1 = gen_reg_rtx (imode);
+-			  emit_move_insn (op1, val_hi[1]);
++			  op0 = force_reg (imode, val_hi[0]);
++			  op1 = force_reg (imode, val_hi[1]);
+ 			  emit_insn (
+ 			    loongarch_vec_repl2_256 (target_hi, op0, op1));
+ 			}
+ 		      else if (i > 1)
+ 			{
+-			  op0 = gen_reg_rtx (imode);
+-			  emit_move_insn (op0, val_hi[i]);
++			  op0 = force_reg (imode, val_hi[i]);
+ 			  emit_insn (
+ 			    loongarch_vec_set256 (target_hi, op0, GEN_INT (i)));
+ 			}
+ 		    }
+ 		  else
+ 		    {
++		      op0 = force_reg (imode, val_hi[i]);
+ 		      /* Assign the lowest element of val_hi to all elements
+ 			 of target_hi.  */
+ 		      if (i == 0)
+ 			{
+-			  op0 = gen_reg_rtx (imode);
+-			  emit_move_insn (op0, val_hi[0]);
+ 			  emit_insn (loongarch_vec_repl1_256 (target_hi, op0));
+ 			}
+ 		      else if (!rtx_equal_p (val_hi[i], val_hi[0]))
+ 			{
+-			  op0 = gen_reg_rtx (imode);
+-			  emit_move_insn (op0, val_hi[i]);
+ 			  emit_insn (
+ 			    loongarch_vec_set256 (target_hi, op0, GEN_INT (i)));
+ 			}
+@@ -10077,18 +10070,15 @@ loongarch_expand_vector_init (rtx target, rtx vals)
+ 		}
+ 	      if (!lo_same && !half_same)
+ 		{
++		  op0 = force_reg (imode, val_lo[i]);
+ 		  /* Assign the lowest element of val_lo to all elements
+ 		     of target_lo.  */
+ 		  if (i == 0)
+ 		    {
+-		      op0 = gen_reg_rtx (imode);
+-		      emit_move_insn (op0, val_lo[0]);
+ 		      emit_insn (loongarch_vec_repl1_128 (target_lo, op0));
+ 		    }
+ 		  else if (!rtx_equal_p (val_lo[i], val_lo[0]))
+ 		    {
+-		      op0 = gen_reg_rtx (imode);
+-		      emit_move_insn (op0, val_lo[i]);
+ 		      emit_insn (
+ 			loongarch_vec_set128 (target_lo, op0, GEN_INT (i)));
+ 		    }
+@@ -10120,16 +10110,13 @@ loongarch_expand_vector_init (rtx target, rtx vals)
+ 		     reduce the number of instructions.  */
+ 		  if (i == 1)
+ 		    {
+-		      op0 = gen_reg_rtx (imode);
+-		      emit_move_insn (op0, val[0]);
+-		      op1 = gen_reg_rtx (imode);
+-		      emit_move_insn (op1, val[1]);
++		      op0 = force_reg (imode, val[0]);
++		      op1 = force_reg (imode, val[1]);
+ 		      emit_insn (loongarch_vec_repl2_128 (target, op0, op1));
+ 		    }
+ 		  else if (i > 1)
+ 		    {
+-		      op0 = gen_reg_rtx (imode);
+-		      emit_move_insn (op0, val[i]);
++		      op0 = force_reg (imode, val[i]);
+ 		      emit_insn (
+ 			loongarch_vec_set128 (target, op0, GEN_INT (i)));
+ 		    }
+@@ -10142,18 +10129,15 @@ loongarch_expand_vector_init (rtx target, rtx vals)
+ 			loongarch_vec_mirror (target, target, const0_rtx));
+ 		      return;
+ 		    }
++		  op0 = force_reg (imode, val[i]);
+ 		  /* Assign the lowest element of val to all elements of
+ 		     target.  */
+ 		  if (i == 0)
+ 		    {
+-		      op0 = gen_reg_rtx (imode);
+-		      emit_move_insn (op0, val[0]);
+ 		      emit_insn (loongarch_vec_repl1_128 (target, op0));
+ 		    }
+ 		  else if (!rtx_equal_p (val[i], val[0]))
+ 		    {
+-		      op0 = gen_reg_rtx (imode);
+-		      emit_move_insn (op0, val[i]);
+ 		      emit_insn (
+ 			loongarch_vec_set128 (target, op0, GEN_INT (i)));
+ 		    }
+diff --git a/src/gcc/testsuite/g++.target/loongarch/pr113033.C b/src/gcc/testsuite/g++.target/loongarch/pr113033.C
+new file mode 100644
+index 000000000..ec9b5f621
+--- /dev/null
++++ b/src/gcc/testsuite/g++.target/loongarch/pr113033.C
+@@ -0,0 +1,10 @@
++/* PR target/113033: ICE with vector left rotate */
++/* { dg-do compile } */
++/* { dg-options "-O3 -mlasx" } */
++
++typedef  unsigned long long __attribute__ ((__vector_size__ (16))) v2di;
++v2di
++test (v2di a, int imm8)
++{
++      return (a << (imm8 & 63)) | (a >> (64 - (imm8 & 63)));
++}
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/pr113033.c b/src/gcc/testsuite/gcc.target/loongarch/pr113033.c
+new file mode 100644
+index 000000000..04c1b9c18
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/pr113033.c
+@@ -0,0 +1,24 @@
++/* PR target/113033: ICE with vector left rotate */
++/* { dg-do compile } */
++/* { dg-options "-O2 -mlasx" } */
++
++typedef unsigned __attribute__ ((vector_size (16))) v4si;
++typedef unsigned __attribute__ ((vector_size (32))) v8si;
++typedef unsigned long long __attribute__ ((vector_size (16))) v2di;
++typedef unsigned long long __attribute__ ((vector_size (32))) v4di;
++
++#define TEST(tp) \
++extern tp data_##tp; \
++tp \
++test_##tp (int x) \
++{ \
++  const int bit = sizeof (data_##tp[0]) * __CHAR_BIT__; \
++  data_##tp = data_##tp << (x & (bit - 1)) \
++             | data_##tp >> (bit - x & (bit - 1)); \
++}
++
++TEST (v4si)
++TEST (v8si)
++TEST (v2di)
++TEST (v4di)
++
+-- 
+2.20.1
+

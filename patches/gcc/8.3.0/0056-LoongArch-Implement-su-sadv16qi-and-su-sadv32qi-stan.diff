@@ -1,0 +1,158 @@
+From e2c9958bdd4fb8f22fcc244a3eb0aa41c6702185 Mon Sep 17 00:00:00 2001
+From: Jiahao Xu <xujiahao@loongson.cn>
+Date: Sat, 30 Dec 2023 09:41:59 +0800
+Subject: [PATCH 15/15] LoongArch: Implement <su>sadv16qi and <su>sadv32qi
+ standard names
+
+Change-Id: I57e8b9f9efa4d7ddf649251299134f1850439904
+---
+ src/gcc/config/loongarch/lasx.md              | 34 +++++++++++++++++++
+ src/gcc/config/loongarch/lsx.md               | 34 +++++++++++++++++++
+ .../loongarch/vector/lasx/lasx-sad.c          | 20 +++++++++++
+ .../gcc.target/loongarch/vector/lsx/lsx-sad.c | 20 +++++++++++
+ 4 files changed, 108 insertions(+)
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/vector/lasx/lasx-sad.c
+ create mode 100644 src/gcc/testsuite/gcc.target/loongarch/vector/lsx/lsx-sad.c
+
+diff --git a/src/gcc/config/loongarch/lasx.md b/src/gcc/config/loongarch/lasx.md
+index 1b5fba6e2..4b1010d42 100644
+--- a/src/gcc/config/loongarch/lasx.md
++++ b/src/gcc/config/loongarch/lasx.md
+@@ -5210,3 +5210,37 @@
+         const0_rtx));
+   DONE;
+ })
++
++(define_expand "usadv32qi"
++  [(match_operand:V8SI 0 "register_operand")
++   (match_operand:V32QI 1 "register_operand")
++   (match_operand:V32QI 2 "register_operand")
++   (match_operand:V8SI 3 "register_operand")]
++  "ISA_HAS_LASX"
++{
++  rtx t1 = gen_reg_rtx (V32QImode);
++  rtx t2 = gen_reg_rtx (V16HImode);
++  rtx t3 = gen_reg_rtx (V8SImode);
++  emit_insn (gen_lasx_xvabsd_u_bu (t1, operands[1], operands[2]));
++  emit_insn (gen_lasx_xvhaddw_hu_bu (t2, t1, t1));
++  emit_insn (gen_lasx_xvhaddw_wu_hu (t3, t2, t2));
++  emit_insn (gen_addv8si3 (operands[0], t3, operands[3]));
++  DONE;
++})
++
++(define_expand "ssadv32qi"
++  [(match_operand:V8SI 0 "register_operand")
++   (match_operand:V32QI 1 "register_operand")
++   (match_operand:V32QI 2 "register_operand")
++   (match_operand:V8SI 3 "register_operand")]
++  "ISA_HAS_LASX"
++{
++  rtx t1 = gen_reg_rtx (V32QImode);
++  rtx t2 = gen_reg_rtx (V16HImode);
++  rtx t3 = gen_reg_rtx (V8SImode);
++  emit_insn (gen_lasx_xvabsd_s_b (t1, operands[1], operands[2]));
++  emit_insn (gen_lasx_xvhaddw_hu_bu (t2, t1, t1));
++  emit_insn (gen_lasx_xvhaddw_wu_hu (t3, t2, t2));
++  emit_insn (gen_addv8si3 (operands[0], t3, operands[3]));
++  DONE;
++})
+diff --git a/src/gcc/config/loongarch/lsx.md b/src/gcc/config/loongarch/lsx.md
+index 688c67cc2..e4581b314 100644
+--- a/src/gcc/config/loongarch/lsx.md
++++ b/src/gcc/config/loongarch/lsx.md
+@@ -3573,6 +3573,40 @@
+   DONE;
+ })
+ 
++(define_expand "usadv16qi"
++  [(match_operand:V4SI 0 "register_operand")
++   (match_operand:V16QI 1 "register_operand")
++   (match_operand:V16QI 2 "register_operand")
++   (match_operand:V4SI 3 "register_operand")]
++  "ISA_HAS_LSX"
++{
++  rtx t1 = gen_reg_rtx (V16QImode);
++  rtx t2 = gen_reg_rtx (V8HImode);
++  rtx t3 = gen_reg_rtx (V4SImode);
++  emit_insn (gen_lsx_vabsd_u_bu (t1, operands[1], operands[2]));
++  emit_insn (gen_lsx_vhaddw_hu_bu (t2, t1, t1));
++  emit_insn (gen_lsx_vhaddw_wu_hu (t3, t2, t2));
++  emit_insn (gen_addv4si3 (operands[0], t3, operands[3]));
++  DONE;
++})
++
++(define_expand "ssadv16qi"
++  [(match_operand:V4SI 0 "register_operand")
++   (match_operand:V16QI 1 "register_operand")
++   (match_operand:V16QI 2 "register_operand")
++   (match_operand:V4SI 3 "register_operand")]
++  "ISA_HAS_LSX"
++{
++  rtx t1 = gen_reg_rtx (V16QImode);
++  rtx t2 = gen_reg_rtx (V8HImode);
++  rtx t3 = gen_reg_rtx (V4SImode);
++  emit_insn (gen_lsx_vabsd_s_b (t1, operands[1], operands[2]));
++  emit_insn (gen_lsx_vhaddw_hu_bu (t2, t1, t1));
++  emit_insn (gen_lsx_vhaddw_wu_hu (t3, t2, t2));
++  emit_insn (gen_addv4si3 (operands[0], t3, operands[3]));
++  DONE;
++})
++
+ ;; Delete one of two instructions that exactly play the same role.
+ (define_peephole2
+   [(set (match_operand:V2DI 0 "register_operand")
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/vector/lasx/lasx-sad.c b/src/gcc/testsuite/gcc.target/loongarch/vector/lasx/lasx-sad.c
+new file mode 100644
+index 000000000..6c0cdfd97
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/vector/lasx/lasx-sad.c
+@@ -0,0 +1,20 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -mlasx" } */
++
++#define N 1024
++
++#define TEST(SIGN)                                             \
++  SIGN char a_##SIGN[N], b_##SIGN[N];                          \
++  int f_##SIGN (void)                                          \
++  {                                                            \
++    int i, sum = 0;                                            \
++    for (i = 0; i < N; i++)                                    \
++      sum += __builtin_abs (a_##SIGN[i] - b_##SIGN[i]);;       \
++    return sum;                                                \
++  }
++
++TEST(signed);
++TEST(unsigned);
++
++/* { dg-final { scan-assembler {\txvabsd.bu\t} } } */
++/* { dg-final { scan-assembler {\txvabsd.b\t} } } */
+diff --git a/src/gcc/testsuite/gcc.target/loongarch/vector/lsx/lsx-sad.c b/src/gcc/testsuite/gcc.target/loongarch/vector/lsx/lsx-sad.c
+new file mode 100644
+index 000000000..b92110a8b
+--- /dev/null
++++ b/src/gcc/testsuite/gcc.target/loongarch/vector/lsx/lsx-sad.c
+@@ -0,0 +1,20 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -mlsx" } */
++
++#define N 1024
++
++#define TEST(SIGN)                                             \
++  SIGN char a_##SIGN[N], b_##SIGN[N];                          \
++  int f_##SIGN (void)                                          \
++  {                                                            \
++    int i, sum = 0;                                            \
++    for (i = 0; i < N; i++)                                    \
++      sum += __builtin_abs (a_##SIGN[i] - b_##SIGN[i]);;       \
++    return sum;                                                \
++  }
++
++TEST(signed);
++TEST(unsigned);
++
++/* { dg-final { scan-assembler {\tvabsd.bu\t} } } */
++/* { dg-final { scan-assembler {\tvabsd.b\t} } } */
+-- 
+2.39.3
+

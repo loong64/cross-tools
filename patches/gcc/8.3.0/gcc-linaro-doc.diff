@@ -1,0 +1,244 @@
+# DP: Changes for the Linaro 8-2018.xx snapshot (documentation).
+
+LANG=C svn diff svn://gcc.gnu.org/svn/gcc/branches/gcc-8-branch@268147 svn://gcc.gnu.org/svn/gcc/branches/ARM/arm-8-branch \
+	| sed -r 's,^--- (\S+)\t(\S+)(.*)$,--- a/src/\1\t\2,;s,^\+\+\+ (\S+)\t(\S+)(.*)$,+++ b/src/\1\t\2,' \
+	| awk '/^Index:.*\.class/ {skip=1; next} /^Index:/ { skip=0 } skip==0'
+
+Index: gcc/doc/cpp.texi
+===================================================================
+--- a/src/gcc/doc/cpp.texi	(.../gcc-8-branch)
++++ b/src/gcc/doc/cpp.texi	(.../ARM/arm-8-branch)
+@@ -2381,6 +2381,10 @@
+ These macros are defined when the target processor supports atomic compare
+ and swap operations on operands 1, 2, 4, 8 or 16 bytes in length, respectively.
+ 
++@item __HAVE_SPECULATION_SAFE_VALUE
++This macro is defined with the value 1 to show that this version of GCC
++supports @code{__builtin_speculation_safe_value}.
++
+ @item __GCC_HAVE_DWARF2_CFI_ASM
+ This macro is defined when the compiler is emitting DWARF CFI directives
+ to the assembler.  When this is defined, it is possible to emit those same
+Index: gcc/doc/extend.texi
+===================================================================
+--- a/src/gcc/doc/extend.texi	(.../gcc-8-branch)
++++ b/src/gcc/doc/extend.texi	(.../ARM/arm-8-branch)
+@@ -11080,6 +11080,7 @@
+ @findex __builtin_powi
+ @findex __builtin_powif
+ @findex __builtin_powil
++@findex __builtin_speculation_safe_value
+ @findex _Exit
+ @findex _exit
+ @findex abort
+@@ -11723,6 +11724,96 @@
+ 
+ @end deftypefn
+ 
++@deftypefn {Built-in Function} @var{type} __builtin_speculation_safe_value (@var{type} val, @var{type} failval)
++
++This built-in function can be used to help mitigate against unsafe
++speculative execution.  @var{type} may be any integral type or any
++pointer type.
++
++@enumerate
++@item
++If the CPU is not speculatively executing the code, then @var{val}
++is returned.
++@item
++If the CPU is executing speculatively then either:
++@itemize
++@item
++The function may cause execution to pause until it is known that the
++code is no-longer being executed speculatively (in which case
++@var{val} can be returned, as above); or
++@item
++The function may use target-dependent speculation tracking state to cause
++@var{failval} to be returned when it is known that speculative
++execution has incorrectly predicted a conditional branch operation.
++@end itemize
++@end enumerate
++
++The second argument, @var{failval}, is optional and defaults to zero
++if omitted.
++
++GCC defines the preprocessor macro
++@code{__HAVE_BUILTIN_SPECULATION_SAFE_VALUE} for targets that have been
++updated to support this builtin.
++
++The built-in function can be used where a variable appears to be used in a
++safe way, but the CPU, due to speculative execution may temporarily ignore
++the bounds checks.  Consider, for example, the following function:
++
++@smallexample
++int array[500];
++int f (unsigned untrusted_index)
++@{
++  if (untrusted_index < 500)
++    return array[untrusted_index];
++  return 0;
++@}
++@end smallexample
++
++If the function is called repeatedly with @code{untrusted_index} less
++than the limit of 500, then a branch predictor will learn that the
++block of code that returns a value stored in @code{array} will be
++executed.  If the function is subsequently called with an
++out-of-range value it will still try to execute that block of code
++first until the CPU determines that the prediction was incorrect
++(the CPU will unwind any incorrect operations at that point).
++However, depending on how the result of the function is used, it might be
++possible to leave traces in the cache that can reveal what was stored
++at the out-of-bounds location.  The built-in function can be used to
++provide some protection against leaking data in this way by changing
++the code to:
++
++@smallexample
++int array[500];
++int f (unsigned untrusted_index)
++@{
++  if (untrusted_index < 500)
++    return array[__builtin_speculation_safe_value (untrusted_index)];
++  return 0;
++@}
++@end smallexample
++
++The built-in function will either cause execution to stall until the
++conditional branch has been fully resolved, or it may permit
++speculative execution to continue, but using 0 instead of
++@code{untrusted_value} if that exceeds the limit.
++
++If accessing any memory location is potentially unsafe when speculative
++execution is incorrect, then the code can be rewritten as
++
++@smallexample
++int array[500];
++int f (unsigned untrusted_index)
++@{
++  if (untrusted_index < 500)
++    return *__builtin_speculation_safe_value (&array[untrusted_index], NULL);
++  return 0;
++@}
++@end smallexample
++
++which will cause a @code{NULL} pointer to be used for the unsafe case.
++
++@end deftypefn
++
+ @deftypefn {Built-in Function} int __builtin_types_compatible_p (@var{type1}, @var{type2})
+ 
+ You can use the built-in function @code{__builtin_types_compatible_p} to
+Index: gcc/doc/tm.texi
+===================================================================
+--- a/src/gcc/doc/tm.texi	(.../gcc-8-branch)
++++ b/src/gcc/doc/tm.texi	(.../ARM/arm-8-branch)
+@@ -12010,6 +12010,42 @@
+ 
+ @end defmac
+ 
++@deftypefn {Target Hook} bool TARGET_HAVE_SPECULATION_SAFE_VALUE (bool @var{active})
++This hook is used to determine the level of target support for
++ @code{__builtin_speculation_safe_value}.  If called with an argument
++ of false, it returns true if the target has been modified to support
++ this builtin.  If called with an argument of true, it returns true
++ if the target requires active mitigation execution might be speculative.
++ 
++ The default implementation returns false if the target does not define
++ a pattern named @code{speculation_barrier}.  Else it returns true
++ for the first case and whether the pattern is enabled for the current
++ compilation for the second case.
++ 
++ For targets that have no processors that can execute instructions
++ speculatively an alternative implemenation of this hook is available:
++ simply redefine this hook to @code{speculation_safe_value_not_needed}
++ along with your other target hooks.
++@end deftypefn
++
++@deftypefn {Target Hook} rtx TARGET_SPECULATION_SAFE_VALUE (machine_mode @var{mode}, rtx @var{result}, rtx @var{val}, rtx @var{failval})
++This target hook can be used to generate a target-specific code
++ sequence that implements the @code{__builtin_speculation_safe_value}
++ built-in function.  The function must always return @var{val} in
++ @var{result} in mode @var{mode} when the cpu is not executing
++ speculatively, but must never return that when speculating until it
++ is known that the speculation will not be unwound.  The hook supports
++ two primary mechanisms for implementing the requirements.  The first
++ is to emit a speculation barrier which forces the processor to wait
++ until all prior speculative operations have been resolved; the second
++ is to use a target-specific mechanism that can track the speculation
++ state and to return @var{failval} if it can determine that
++ speculation must be unwound at a later time.
++ 
++ The default implementation simply copies @var{val} to @var{result} and
++ emits a @code{speculation_barrier} instruction if that is defined.
++@end deftypefn
++
+ @deftypefn {Target Hook} void TARGET_RUN_TARGET_SELFTESTS (void)
+ If selftests are enabled, run any selftests for this target.
+ @end deftypefn
+Index: gcc/doc/tm.texi.in
+===================================================================
+--- a/src/gcc/doc/tm.texi.in	(.../gcc-8-branch)
++++ b/src/gcc/doc/tm.texi.in	(.../ARM/arm-8-branch)
+@@ -8112,4 +8112,8 @@
+ 
+ @end defmac
+ 
++@hook TARGET_HAVE_SPECULATION_SAFE_VALUE
++
++@hook TARGET_SPECULATION_SAFE_VALUE
++
+ @hook TARGET_RUN_TARGET_SELFTESTS
+Index: gcc/doc/invoke.texi
+===================================================================
+--- a/src/gcc/doc/invoke.texi	(.../gcc-8-branch)
++++ b/src/gcc/doc/invoke.texi	(.../ARM/arm-8-branch)
+@@ -605,7 +605,7 @@
+ -mpc-relative-literal-loads @gol
+ -msign-return-address=@var{scope} @gol
+ -march=@var{name}  -mcpu=@var{name}  -mtune=@var{name}  @gol
+--moverride=@var{string}  -mverbose-cost-dump}
++-moverride=@var{string}  -mverbose-cost-dump -mtrack-speculation} 
+ 
+ @emph{Adapteva Epiphany Options}
+ @gccoptlist{-mhalf-reg-file  -mprefer-short-insn-regs @gol
+@@ -14702,6 +14702,14 @@
+ precision of division results to about 16 bits for
+ single precision and to 32 bits for double precision.
+ 
++@item -mtrack-speculation
++@itemx -mno-track-speculation
++Enable or disable generation of additional code to track speculative
++execution through conditional branches.  The tracking state can then
++be used by the compiler when expanding calls to
++@code{__builtin_speculation_safe_copy} to permit a more efficient code
++sequence to be generated.
++
+ @item -march=@var{name}
+ @opindex march
+ Specify the name of the target architecture and, optionally, one or
+Index: gcc/doc/md.texi
+===================================================================
+--- a/src/gcc/doc/md.texi	(.../gcc-8-branch)
++++ b/src/gcc/doc/md.texi	(.../ARM/arm-8-branch)
+@@ -6955,6 +6955,21 @@
+ before the instruction with respect to loads and stores after the instruction.
+ This pattern has no operands.
+ 
++@cindex @code{speculation_barrier} instruction pattern
++@item @samp{speculation_barrier}
++If the target can support speculative execution, then this pattern should
++be defined to an instruction that will block subsequent execution until
++any prior speculation conditions has been resolved.  The pattern must also
++ensure that the compiler cannot move memory operations past the barrier,
++so it needs to be an UNSPEC_VOLATILE pattern.  The pattern has no
++operands.
++
++If this pattern is not defined then the default expansion of
++@code{__builtin_speculation_safe_value} will emit a warning.  You can
++suppress this warning by defining this pattern with a final condition
++of @code{0} (zero), which tells the compiler that a speculation
++barrier is not needed for this target.
++
+ @cindex @code{sync_compare_and_swap@var{mode}} instruction pattern
+ @item @samp{sync_compare_and_swap@var{mode}}
+ This pattern, if defined, emits code for an atomic compare-and-swap

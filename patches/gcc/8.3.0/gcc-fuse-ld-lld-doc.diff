@@ -1,0 +1,17 @@
+# DP: Allow to use lld with -fuse-ld=ld.lld (documentation)
+
+Index: gcc/doc/invoke.texi
+===================================================================
+--- a/src/gcc/doc/invoke.texi	(revision 246158)
++++ a/src/gcc/doc/invoke.texi	(working copy)
+@@ -10501,6 +10501,10 @@
+ @opindex fuse-ld=gold
+ Use the @command{gold} linker instead of the default linker.
+ 
++@item -fuse-ld=lld
++@opindex fuse-ld=lld
++Use the LLVM @command{lld} linker instead of the default linker.
++
+ @cindex Libraries
+ @item -l@var{library}
+ @itemx -l @var{library}

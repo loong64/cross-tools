@@ -1,0 +1,283 @@
+From 537fbf22ef81a84d619b3bb52c590420b2467462 Mon Sep 17 00:00:00 2001
+From: Yang Yujie <yangyujie@loongson.cn>
+Date: Fri, 14 Oct 2022 17:19:12 +0800
+Subject: [PATCH 10/28] Add build and compile options for 2k1000la. (TODO:
+ reassocation_width tuning)
+
+Unless otherwise specified:
+  "-march=la264" implies "-mlsx -mstrict-align"
+
+Change-Id: I7988e4b47775169a02a1a5cb5a1d233ba8d567f8
+---
+ src/gcc/config.gcc                             |  8 +++++---
+ .../config/loongarch/genopts/loongarch-strings |  1 +
+ .../config/loongarch/genopts/loongarch.opt.in  |  3 +++
+ src/gcc/config/loongarch/loongarch-def.c       | 18 ++++++++++++++++++
+ src/gcc/config/loongarch/loongarch-def.h       |  5 +++--
+ src/gcc/config/loongarch/loongarch-opts.c      | 16 ++++++++++++++++
+ src/gcc/config/loongarch/loongarch-opts.h      |  3 +++
+ src/gcc/config/loongarch/loongarch-str.h       |  1 +
+ src/gcc/config/loongarch/loongarch.c           |  5 ++++-
+ src/gcc/config/loongarch/loongarch.opt         |  3 +++
+ 10 files changed, 57 insertions(+), 6 deletions(-)
+
+diff --git a/src/gcc/config.gcc b/src/gcc/config.gcc
+index 0ec8f27f1..cde6c0055 100644
+--- a/src/gcc/config.gcc
++++ b/src/gcc/config.gcc
+@@ -4465,7 +4465,7 @@ case "${target}" in
+ 
+ 		# Perform initial sanity checks on --with-* options.
+ 		case ${with_arch} in
+-		"" | loongarch64 | la464) ;; # OK, append here.
++		"" | loongarch64 | la464 | la264) ;; # OK, append here.
+ 		native)
+ 			if test x${host} != x${target}; then
+ 				echo "--with-arch=native is illegal for cross-compiler." 1>&2
+@@ -4564,7 +4564,7 @@ case "${target}" in
+ 		case ${with_abi}/${with_abiext} in
+ 		lp64*/base)
+ 			# architectures that support lp64* ABI
+-			arch_pattern="native|loongarch64|la464"
++			arch_pattern="native|loongarch64|la464|la264"
+ 			# default architecture for lp64* ABI
+ 			arch_default="loongarch64"
+ 			;;
+@@ -4643,7 +4643,7 @@ case "${target}" in
+ 			tune_default="native"
+ 			;;
+ 		loongarch64)
+-			tune_pattern="loongarch64|la464"
++			tune_pattern="loongarch64|la464|la264"
+ 			tune_default="la464"
+ 			;;
+ 		*)
+@@ -5226,12 +5226,14 @@ case ${target} in
+ 		case ${with_arch} in
+ 		native)		tm_defines="${tm_defines} DEFAULT_CPU_ARCH=CPU_NATIVE" ;;
+ 		la464)		tm_defines="${tm_defines} DEFAULT_CPU_ARCH=CPU_LA464" ;;
++		la264)		tm_defines="${tm_defines} DEFAULT_CPU_ARCH=CPU_LA264" ;;
+ 		loongarch64)	tm_defines="${tm_defines} DEFAULT_CPU_ARCH=CPU_LOONGARCH64" ;;
+ 		esac
+ 
+ 		case ${with_tune} in
+ 		native)		tm_defines="${tm_defines} DEFAULT_CPU_TUNE=CPU_NATIVE" ;;
+ 		la464)		tm_defines="${tm_defines} DEFAULT_CPU_TUNE=CPU_LA464" ;;
++		la264)		tm_defines="${tm_defines} DEFAULT_CPU_TUNE=CPU_LA264" ;;
+ 		loongarch64)	tm_defines="${tm_defines} DEFAULT_CPU_TUNE=CPU_LOONGARCH64" ;;
+ 		esac
+ 
+diff --git a/src/gcc/config/loongarch/genopts/loongarch-strings b/src/gcc/config/loongarch/genopts/loongarch-strings
+index 22aa6e7cb..513e5b68d 100644
+--- a/src/gcc/config/loongarch/genopts/loongarch-strings
++++ b/src/gcc/config/loongarch/genopts/loongarch-strings
+@@ -25,6 +25,7 @@ OPTSTR_TUNE	      tune
+ STR_CPU_NATIVE	      native
+ STR_CPU_LOONGARCH64   loongarch64
+ STR_CPU_LA464	      la464
++STR_CPU_LA264	      la264
+ 
+ # Base architecture
+ STR_ISA_BASE_LA64V100 la64
+diff --git a/src/gcc/config/loongarch/genopts/loongarch.opt.in b/src/gcc/config/loongarch/genopts/loongarch.opt.in
+index 141d03eaa..585d202aa 100644
+--- a/src/gcc/config/loongarch/genopts/loongarch.opt.in
++++ b/src/gcc/config/loongarch/genopts/loongarch.opt.in
+@@ -101,6 +101,9 @@ Enum(cpu_type) String(@@STR_CPU_LOONGARCH64@@) Value(CPU_LOONGARCH64)
+ EnumValue
+ Enum(cpu_type) String(@@STR_CPU_LA464@@) Value(CPU_LA464)
+ 
++EnumValue
++Enum(cpu_type) String(@@STR_CPU_LA264@@) Value(CPU_LA264)
++
+ m@@OPTSTR_ARCH@@=
+ Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_arch) Init(M_OPTION_NOT_SEEN)
+ -m@@OPTSTR_ARCH@@=PROCESSOR	Generate code for the given PROCESSOR ISA.
+diff --git a/src/gcc/config/loongarch/loongarch-def.c b/src/gcc/config/loongarch/loongarch-def.c
+index 8e865303f..8d99252a9 100644
+--- a/src/gcc/config/loongarch/loongarch-def.c
++++ b/src/gcc/config/loongarch/loongarch-def.c
+@@ -42,6 +42,7 @@ loongarch_cpu_strings[N_TUNE_TYPES] = {
+   [CPU_NATIVE]		  = STR_CPU_NATIVE,
+   [CPU_LOONGARCH64]	  = STR_CPU_LOONGARCH64,
+   [CPU_LA464]		  = STR_CPU_LA464,
++  [CPU_LA264]		  = STR_CPU_LA264,
+ };
+ 
+ struct loongarch_isa
+@@ -56,6 +57,11 @@ loongarch_cpu_default_isa[N_ARCH_TYPES] = {
+       .fpu = ISA_EXT_FPU64,
+       .simd = ISA_EXT_SIMD_LASX,
+   },
++  [CPU_LA264] = {
++      .base = ISA_BASE_LA64V100,
++      .fpu = ISA_EXT_FPU64,
++      .simd = ISA_EXT_SIMD_LSX,
++  },
+ };
+ 
+ struct loongarch_cache
+@@ -72,6 +78,13 @@ loongarch_cpu_cache[N_TUNE_TYPES] = {
+       .l2d_size = 256,
+       .simultaneous_prefetches = 4,
+   },
++  [CPU_LA264] = {
++      /* Loongson 2K1000LA specs */
++      .l1d_line_size = 64,
++      .l1d_size = 32,
++      .l2d_size = 1024,
++      .simultaneous_prefetches = 4,
++  },
+ };
+ 
+ /* The following properties cannot be looked up directly using "cpucfg".
+@@ -90,6 +103,9 @@ loongarch_cpu_rtx_cost_data[N_TUNE_TYPES] = {
+   [CPU_LA464] = {
+       DEFAULT_COSTS
+   },
++  [CPU_LA264] = {
++      DEFAULT_COSTS
++  },
+ };
+ 
+ /* RTX costs to use when optimizing for size.  */
+@@ -113,6 +129,7 @@ loongarch_cpu_issue_rate[N_TUNE_TYPES] = {
+   [CPU_NATIVE]	      = 4,
+   [CPU_LOONGARCH64]   = 4,
+   [CPU_LA464]	      = 4,
++  [CPU_LA264]	      = 2,
+ };
+ 
+ int
+@@ -120,6 +137,7 @@ loongarch_cpu_multipass_dfa_lookahead[N_TUNE_TYPES] = {
+   [CPU_NATIVE]	      = 4,
+   [CPU_LOONGARCH64]   = 4,
+   [CPU_LA464]	      = 4,
++  [CPU_LA264]	      = 4,
+ };
+ 
+ /* Wiring string definitions from loongarch-str.h to global arrays
+diff --git a/src/gcc/config/loongarch/loongarch-def.h b/src/gcc/config/loongarch/loongarch-def.h
+index 0051e463f..41d9902e5 100644
+--- a/src/gcc/config/loongarch/loongarch-def.h
++++ b/src/gcc/config/loongarch/loongarch-def.h
+@@ -153,8 +153,9 @@ struct loongarch_target
+ #define CPU_NATIVE	  0
+ #define CPU_LOONGARCH64	  1
+ #define CPU_LA464	  2
+-#define N_ARCH_TYPES	  3
+-#define N_TUNE_TYPES	  3
++#define CPU_LA264	  3
++#define N_ARCH_TYPES	  4
++#define N_TUNE_TYPES	  4
+ 
+ /* parallel tables.  */
+ extern const char* loongarch_cpu_strings[];
+diff --git a/src/gcc/config/loongarch/loongarch-opts.c b/src/gcc/config/loongarch/loongarch-opts.c
+index a5c208043..fb1d4ae41 100644
+--- a/src/gcc/config/loongarch/loongarch-opts.c
++++ b/src/gcc/config/loongarch/loongarch-opts.c
+@@ -690,6 +690,7 @@ multilib_enabled_abi_list ()
+ /* option status feedback for "gcc --help=target -Q" */
+ void
+ loongarch_update_gcc_opt_status (struct gcc_options *opts,
++				 struct gcc_options *opts_set,
+ 				 struct loongarch_target *target)
+ {
+   /* status of -mlsx and -mlasx */
+@@ -739,4 +740,19 @@ loongarch_update_gcc_opt_status (struct gcc_options *opts,
+       default:
+ 	gcc_unreachable ();
+     }
++
++  /* miscellaneous configurations */
++  switch (target->cpu_arch)
++    {
++      case CPU_LA264:
++
++	/* Using -mstrict-align is recommended for 2K1000LA.  */
++	if (!opts_set->x_TARGET_STRICT_ALIGN)
++	  {
++	    opts->x_TARGET_STRICT_ALIGN = 1;
++	    opts_set->x_TARGET_STRICT_ALIGN = 1;
++	  }
++
++	break;
++    }
+ }
+diff --git a/src/gcc/config/loongarch/loongarch-opts.h b/src/gcc/config/loongarch/loongarch-opts.h
+index 2b82256ac..596b68a08 100644
+--- a/src/gcc/config/loongarch/loongarch-opts.h
++++ b/src/gcc/config/loongarch/loongarch-opts.h
+@@ -43,6 +43,7 @@ loongarch_config_target (struct loongarch_target *target,
+ 
+ void
+ loongarch_update_gcc_opt_status (struct gcc_options *opts,
++				 struct gcc_options *opts_set,
+ 				 struct loongarch_target *target);
+ #endif
+ 
+@@ -88,9 +89,11 @@ loongarch_update_gcc_opt_status (struct gcc_options *opts,
+ 
+ #define TARGET_ARCH_LOONGARCH64	  (LARCH_ACTUAL_ARCH == CPU_LOONGARCH64)
+ #define TARGET_ARCH_LA464	  (LARCH_ACTUAL_ARCH == CPU_LA464)
++#define TARGET_ARCH_LA264	  (LARCH_ACTUAL_ARCH == CPU_LA264)
+ 
+ #define TARGET_TUNE_LOONGARCH64	  (LARCH_ACTUAL_TUNE == CPU_LOONGARCH64)
+ #define TARGET_TUNE_LA464	  (LARCH_ACTUAL_TUNE == CPU_LA464)
++#define TARGET_TUNE_LA264	  (LARCH_ACTUAL_TUNE == CPU_LA264)
+ 
+ /* Note: optimize_size may vary across functions,
+    while -m[no]-memcpy imposes a global constraint.  */
+diff --git a/src/gcc/config/loongarch/loongarch-str.h b/src/gcc/config/loongarch/loongarch-str.h
+index 4c6f0a16b..26dc0b02b 100644
+--- a/src/gcc/config/loongarch/loongarch-str.h
++++ b/src/gcc/config/loongarch/loongarch-str.h
+@@ -29,6 +29,7 @@ along with GCC; see the file COPYING3.  If not see
+ #define STR_CPU_NATIVE "native"
+ #define STR_CPU_LOONGARCH64 "loongarch64"
+ #define STR_CPU_LA464 "la464"
++#define STR_CPU_LA264 "la264"
+ 
+ #define STR_ISA_BASE_LA64V100 "la64"
+ 
+diff --git a/src/gcc/config/loongarch/loongarch.c b/src/gcc/config/loongarch/loongarch.c
+index 53baadf95..fa161ce5b 100644
+--- a/src/gcc/config/loongarch/loongarch.c
++++ b/src/gcc/config/loongarch/loongarch.c
+@@ -6997,7 +6997,8 @@ loongarch_option_override_internal (struct gcc_options *opts,
+ 			   la_opt_cpu_arch, la_opt_cpu_tune, la_opt_fpu,
+ 			   la_opt_abi_base, la_opt_abi_ext, la_opt_cmodel, 0);
+ 
+-  loongarch_update_gcc_opt_status (opts, &la_target);
++  loongarch_update_gcc_opt_status (opts, opts_set, &la_target);
++
+   if (TARGET_ABI_LP64)
+     flag_pcc_struct_return = 0;
+ 
+@@ -9251,6 +9252,8 @@ loongarch_sched_reassociation_width (unsigned int opc ATTRIBUTE_UNUSED,
+       else if (FLOAT_MODE_P (mode))
+           return 4;
+       break;
++
++    case CPU_LA264:
+     default:
+       break;
+     }
+diff --git a/src/gcc/config/loongarch/loongarch.opt b/src/gcc/config/loongarch/loongarch.opt
+index e9b36591b..4811964aa 100644
+--- a/src/gcc/config/loongarch/loongarch.opt
++++ b/src/gcc/config/loongarch/loongarch.opt
+@@ -108,6 +108,9 @@ Enum(cpu_type) String(loongarch64) Value(CPU_LOONGARCH64)
+ EnumValue
+ Enum(cpu_type) String(la464) Value(CPU_LA464)
+ 
++EnumValue
++Enum(cpu_type) String(la264) Value(CPU_LA264)
++
+ march=
+ Target RejectNegative Joined Enum(cpu_type) Var(la_opt_cpu_arch) Init(M_OPTION_NOT_SEEN)
+ -march=PROCESSOR	Generate code for the given PROCESSOR ISA.
+-- 
+2.31.1
+

@@ -1,0 +1,36 @@
+Description: remove -f*-prefix-map options from .ali files
+ The -f(file|debug|macro)-prefix-map=OLD=NEW options
+ added by revision 256847
+ explicitly ask that OLD is never written.
+Forwarded: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=87972
+Author: Nicolas Boulenguez <nicolas@debian.org>
+
+--- a/src/gcc/ada/lib-writ.adb
++++ b/src/gcc/ada/lib-writ.adb
+@@ -1223,10 +1223,22 @@ package body Lib.Writ is
+       --  Write command argument ('A') lines
+ 
+       for A in 1 .. Compilation_Switches.Last loop
+-         Write_Info_Initiate ('A');
+-         Write_Info_Char (' ');
+-         Write_Info_Str (Compilation_Switches.Table (A).all);
+-         Write_Info_Terminate;
++         --  The -f(file|debug|macro)-prefix-map=OLD=NEW options
++         --  explicitly ask that OLD is never written.
++         declare
++            S : String renames Compilation_Switches.Table (A).all;
++         begin
++            if S'Length < 19            --
++              or else (S (S'First .. S'First + 18) /= "-fdebug-prefix-map="
++                   and S (S'First .. S'First + 17) /= "-ffile-prefix-map="
++                   and S (S'First .. S'First + 18) /= "-fmacro-prefix-map=")
++            then
++               Write_Info_Initiate ('A');
++               Write_Info_Char (' ');
++               Write_Info_Str (S);
++               Write_Info_Terminate;
++            end if;
++         end;
+       end loop;
+ 
+       --  Output parameters ('P') line
