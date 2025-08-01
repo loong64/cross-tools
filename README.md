@@ -10,7 +10,7 @@ LoongArch64 cross-compile toolchain, supports both x86_64(amd64) and aarch64(arm
 | legacy       | loongarch64-unknown-linux-musl     | 6.6.74      | 2.41       | 13.3.0     |             | 1.2.5      |
 | stable       | loongarch64-unknown-linux-gnu      | 6.6.74      | 2.41       | 12.4.0     | 2.38        |            |
 | stable       | loongarch64-unknown-linux-musl     | 6.6.74      | 2.41       | 14.2.0     |             | 1.2.5      |
-| mainline     | loongarch64-unknown-linux-gnu      | 6.12.11     | 2.43.1     | 14.2.0     | 2.41        |            |
+| mainline     | loongarch64-unknown-linux-gnu      | 6.12.11     | 2.41       | 14.2.0     | 2.41        |            |
 | mainline     | loongarch64-unknown-linux-musl     | 6.12.11     | 2.43.1     | 14.2.0     |             | 1.2.5      |
 | latest       | loongarch64-unknown-linux-gnu      | 6.13        | 2.43.1     | 14.2.0     | 2.41        |            |
 | latest       | loongarch64-unknown-linux-musl     | 6.13        | 2.43.1     | 14.2.0     |             | 1.2.5      |
