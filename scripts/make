@@ -100,7 +100,7 @@ cp -r targets/${TARGET}/${VERSION}/patches build/
 # Replace CT_HOST="" to real HOST_PREFIX
 sed -i "s/CT_HOST=\"\"/CT_HOST=\"${HOST_PREFIX}\"/g" build/.config
 # Replace CT_LOCAL_PATCH_DIR="REPLASE_ME" to real path
-sed -i "s/CT_LOCAL_PATCH_DIR=\"REPLASE_ME\"/CT_LOCAL_PATCH_DIR=\"$(realpath build/patches)\"/g" build/.config
+sed -i "s@CT_LOCAL_PATCH_DIR=\"REPLASE_ME\"@CT_LOCAL_PATCH_DIR=\"$(realpath build/patches)\"@g" build/.config
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
 ct-ng build.2 || { tail -n 500 build.log; exit $ERRCODE; }
