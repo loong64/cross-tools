@@ -1,7 +1,7 @@
-diff --git a/home/elysia/Projects/loongson/portgcc/gcc15-b/gcc/config/loongarch/gnu-user.h b/home/elysia/Projects/loongson/portgcc/gcc15/gcc/config/loongarch/gnu-user.h
+diff --git a/gcc/config/loongarch/gnu-user.h b/gcc/config/loongarch/gnu-user.h
 index fbc75a9..6c35ec4 100644
---- a/home/elysia/Projects/loongson/portgcc/gcc15-b/gcc/config/loongarch/gnu-user.h
-+++ b/home/elysia/Projects/loongson/portgcc/gcc15/gcc/config/loongarch/gnu-user.h
+--- a/gcc/config/loongarch/gnu-user.h
++++ b/gcc/config/loongarch/gnu-user.h
 @@ -31,7 +31,10 @@ along with GCC; see the file COPYING3.  If not see
  
  #undef GLIBC_DYNAMIC_LINKER
