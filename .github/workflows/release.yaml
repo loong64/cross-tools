@@ -26,8 +26,8 @@ jobs:
           # - latest
           - oldworld
         target:
-          # - loongarch64-unknown-linux-gnu
-          - loongarch64-unknown-linux-musl
+          - loongarch64-unknown-linux-gnu
+          # - loongarch64-unknown-linux-musl
 
     steps:
       - name: Checkout
