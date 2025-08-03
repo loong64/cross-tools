@@ -1,0 +1,16 @@
+diff --git a/gcc/config/loongarch/gnu-user.h b/gcc/config/loongarch/gnu-user.h
+index fbc75a9..6c35ec4 100644
+--- a/gcc/config/loongarch/gnu-user.h
++++ b/gcc/config/loongarch/gnu-user.h
+@@ -31,7 +31,10 @@ along with GCC; see the file COPYING3.  If not see
+ 
+ #undef GLIBC_DYNAMIC_LINKER
+ #define GLIBC_DYNAMIC_LINKER \
+-  "/lib" ABI_GRLEN_SPEC "/ld-linux-loongarch-" ABI_SPEC ".so.1"
++  "/lib" ABI_GRLEN_SPEC "/" \
++  "%{mabi=lp64d:ld.so.1;" \
++    "mabi=lp64s:ld-linux-loongarch-lp64s.so.1;" \
++    "mabi=lp64f:ld-linux-loongarch-lp64f.so.1}"
+ 
+ #define MUSL_ABI_SPEC \
+   "%{mabi=lp64d:}" \
