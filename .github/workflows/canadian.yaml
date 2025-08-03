@@ -24,6 +24,7 @@ jobs:
           - stable
           - mainline
           - latest
+          - oldworld
         target:
           - loongarch64-unknown-linux-gnu
           - loongarch64-unknown-linux-musl
