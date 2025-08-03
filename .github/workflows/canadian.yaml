@@ -1,4 +1,4 @@
-name: Release
+name: Canadian
 
 on:
   workflow_dispatch:
@@ -32,6 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: canadian
           fetch-depth: 1
       - name: Build
         id: build
@@ -63,6 +64,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: canadian
           fetch-depth: 1
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -84,17 +86,16 @@ jobs:
           set -x
           git config --global user.name "${GITHUB_ACTOR}"
           git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-          tag_name="$(date +%Y%m%d)"
+          tag_name="canadian-$(date +%Y%m%d)"
           echo "tag_name=${tag_name}" >> $GITHUB_ENV
           git tag ${tag_name} || true
           git push origin ${tag_name} || true
-          gh release create ${tag_name} --title "${tag_name}" --generate-notes || true
+          gh release create ${tag_name} --title "${tag_name}" --generate-notes --prerelease || true
       - name: Upload artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for i in release/*.tar.xz; do
-            # gh release upload ${{ env.tag_name }} $i $i.sha256
-            gh release upload ${{ env.tag_name }} $i
+            gh release upload ${{ env.tag_name }} $i $i.sha256
           done
           gh release edit ${{ env.tag_name }} -F RELEASE.md
