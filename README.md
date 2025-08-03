@@ -19,6 +19,8 @@ LoongArch64 cross-compile toolchain, supports both x86_64(amd64) and aarch64(arm
 
 ### ABI1.0 (a.k.a the old world)
 
+** These toolchains are EXPERIMENTAL! ** It may contain unkown bugs, and thereby use with caution.
+
 | Version      | Target                             | Kernel      | Binutils   | GCC        | Libc(glibc) | Libc(musl) |
 |--------------|------------------------------------|-------------|------------|------------|-------------|------------|
 | oldworld     | loongarch64-unknown-linux-gnu      | 4.19.190    | 2.31.1     | 14.2.0     | 2.28        |            |
