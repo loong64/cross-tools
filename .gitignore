@@ -1,0 +1,5 @@
+/crosstool-ng-crosstool-ng-*/
+*.old
+build/
+*.tar.*
+/loongarch32-unknown-elf/

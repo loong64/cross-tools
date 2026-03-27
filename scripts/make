@@ -37,6 +37,7 @@ sudo apt-get install -y --no-install-recommends \
     lzip \
     make \
     ninja-build \
+    meson \
     patch \
     pkg-config \
     python3 \
@@ -70,6 +71,12 @@ sudo mkdir -p /opt
 sudo chmod 0777 /opt
 mkdir -p build
 cp targets/${TARGET}/${VERSION}/.config build/.config
+if [ -e targets/${TARGET}/${VERSION}/patches ]; then
+    rm -rf build/patches
+    cp -r targets/${TARGET}/${VERSION}/patches build/
+    # Replace CT_LOCAL_PATCH_DIR="REPLACE_ME" to real path
+    sed -i "s@CT_LOCAL_PATCH_DIR=\"REPLACE_ME\"@CT_LOCAL_PATCH_DIR=\"$(realpath build/patches)\"@g" build/.config
+fi
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
 ct-ng build || { tail -n 500 build.log; exit $ERRCODE; }

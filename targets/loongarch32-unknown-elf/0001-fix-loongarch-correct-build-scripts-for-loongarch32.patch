@@ -1,0 +1,66 @@
+From 7791625d63ffbb3094813da5cb301429426f033c Mon Sep 17 00:00:00 2001
+From: Elysia <a.elysia@proton.me>
+Date: Sat, 28 Mar 2026 10:53:03 +0800
+Subject: [PATCH] fix(loongarch): correct build scripts for loongarch32 and
+ picolibc
+
+Signed-off-by: Elysia <a.elysia@proton.me>
+---
+ config/arch/loongarch.in |  3 ++-
+ scripts/build/cc/gcc.sh  | 12 ++++++++++--
+ 2 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/config/arch/loongarch.in b/config/arch/loongarch.in
+index 6218c33..e983fc8 100644
+--- a/config/arch/loongarch.in
++++ b/config/arch/loongarch.in
+@@ -3,6 +3,7 @@
+ ## no-package
+ ## depends on EXPERIMENTAL
+ ##
++## select ARCH_SUPPORTS_32
+ ## select ARCH_SUPPORTS_64
+ ## select ARCH_DEFAULT_64
+ ## select ARCH_SUPPORTS_BOTH_MMU
+@@ -11,7 +12,7 @@
+ ## select ARCH_SUPPORTS_WITH_TUNE
+ ## select GCC_REQUIRE_12_or_later
+ ## select BINUTILS_REQUIRE_2_39_or_later
+-## select LINUX_REQUIRE_5_19_or_later
++## select LINUX_REQUIRE_5_19_or_later if KERNEL_LINUX
+ ## select GDB_REQUIRE_12_1_or_later if DEBUG_GDB
+ ## select GLIBC_REQUIRE_2_36_or_later if LIBC_GLIBC
+ 
+diff --git a/scripts/build/cc/gcc.sh b/scripts/build/cc/gcc.sh
+index 57f5f22..8870cfa 100644
+--- a/scripts/build/cc/gcc.sh
++++ b/scripts/build/cc/gcc.sh
+@@ -313,7 +313,11 @@ do_gcc_core_backend() {
+ 
+     case "${mode}" in
+         static)
+-            extra_config+=("--with-newlib")
++            if [ "${CT_LIBC_PICOLIBC}" = "y" ]; then
++                extra_config+=("--with-picolibc")
++            else
++                extra_config+=("--with-newlib")
++            fi
+             extra_config+=("--enable-threads=no")
+             extra_config+=("--disable-shared")
+             ;;
+@@ -321,7 +325,11 @@ do_gcc_core_backend() {
+             extra_config+=("--enable-shared")
+             ;;
+         baremetal)
+-            extra_config+=("--with-newlib")
++            if [ "${CT_LIBC_PICOLIBC}" = "y" ]; then
++                extra_config+=("--with-picolibc")
++            else
++                extra_config+=("--with-newlib")
++            fi
+             extra_config+=("--enable-threads=no")
+             extra_config+=("--disable-shared")
+             ;;
+-- 
+2.53.0
+
