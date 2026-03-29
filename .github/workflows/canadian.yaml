@@ -19,6 +19,7 @@ jobs:
         host_arch:
           - x86_64
           - aarch64
+          - loongarch64
           - mingw-w64
         version:
           - git-canadian

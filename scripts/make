@@ -40,6 +40,11 @@ if [ $CANADIAN_BUILD -eq 1 ]; then
             GPP_PACKAGE="g++-mingw-w64-x86-64-win32"
             HOST_PREFIX="x86_64-w64-mingw32"
             ;;
+        loongarch64)
+            GCC_PACKAGE=""
+            GPP_PACKAGE=""
+            HOST_PREFIX="loongarch64-unknown-linux-gnu"
+            ;;
         *)
             echo "Unsupported host architecture: ${HOST_ARCH}"
             exit 1
@@ -84,6 +89,14 @@ sudo apt-get install -y --no-install-recommends \
     libffi-dev \
     "$GCC_PACKAGE" \
     "$GPP_PACKAGE"
+
+# Install toolchain for loongarch64
+if [ $CANADIAN_BUILD -eq 1 ] && [ "$HOST_ARCH" = "loongarch64" ]; then
+    sudo mkdir -p /opt/x-tools
+    curl -Lf https://github.com/loong64/cross-tools/releases/download/20250911/x86_64-cross-tools-loongarch64-unknown-linux-gnu-stable.tar.xz | tar xJf - -C /opt/x-tools
+    rm -rf x86_64-cross-tools-loongarch64-unknown-linux-gnu-stable.tar.xz
+    export PATH="/opt/x-tools/loongarch64-unknown-linux-gnu/bin:$PATH"
+fi
 
 # crosstool-ng
 if [ ! -e /usr/bin/ct-ng ]; then
