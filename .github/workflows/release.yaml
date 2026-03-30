@@ -20,7 +20,7 @@ jobs:
         version:
           - git
         target:
-          - loongarch32-unknown-elf
+          - loongarch32-picolibc-elf
 
     steps:
       - name: Checkout

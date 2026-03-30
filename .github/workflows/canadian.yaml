@@ -24,7 +24,7 @@ jobs:
         version:
           - git-canadian
         target:
-          - loongarch32-unknown-elf
+          - loongarch32-picolibc-elf
 
     steps:
       - name: Checkout
@@ -61,7 +61,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: canadian
           fetch-depth: 1
       - name: Download artifacts
         uses: actions/download-artifact@v4
