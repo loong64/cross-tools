@@ -22,7 +22,7 @@ jobs:
           - loongarch64
           - mingw-w64
         version:
-          - git-canadian
+          - latest-canadian
         target:
           - loongarch32-picolibc-elf
 

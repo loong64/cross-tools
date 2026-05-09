@@ -6,7 +6,7 @@ LoongArch32 cross-compile toolchain, supports both x86_64(amd64) and aarch64(arm
 
 | Version      | Target                             | picolibc      | Binutils   | GCC         |
 |--------------|------------------------------------|-------------|------------|------------|
-| git          | loongarch32-unknown-elf            | 1.8.10     | 2.46       | git master branch     |
+| latest          | loongarch32-unknown-elf            | 1.8.10     | 2.46       | 16.1.0     |
 
 
 
