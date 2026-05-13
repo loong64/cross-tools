@@ -51,13 +51,18 @@ sudo apt-get install -y --no-install-recommends \
 
 # crosstool-ng
 if [ ! -e /usr/bin/ct-ng ]; then
-    curl -Lf https://github.com/crosstool-ng/crosstool-ng/archive/crosstool-ng-1.28.0.tar.gz | tar xzf -
-    pushd crosstool-ng-crosstool-ng-1.28.0
-    for i in ../targets/${TARGET}/*; do
-        if [[ $i == *.patch ]]; then
-            patch -Np1 -i $i
-        fi
-    done
+    if [ $VERSION != "latest" ]; then
+        curl -Lf https://github.com/crosstool-ng/crosstool-ng/archive/crosstool-ng-1.28.0.tar.gz | tar xzf -
+        pushd crosstool-ng-crosstool-ng-1.28.0
+        for i in ../targets/${TARGET}/*; do
+            if [[ $i == *.patch ]]; then
+                patch -Np1 -i $i
+            fi
+        done
+    else
+        curl -Lf https://github.com/crosstool-ng/crosstool-ng/archive/refs/heads/master.tar.gz | tar xzf -
+        pushd crosstool-ng-master
+    fi
     ./bootstrap
     ./configure --prefix=/usr
     make -j$(nproc)
