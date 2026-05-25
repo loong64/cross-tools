@@ -70,7 +70,21 @@ jobs:
 
           if [[ "${{ steps.runner.outputs.macos }}" == "true" ]]; then
             ulimit -n 2048
+            image="$RUNNER_TEMP/cross-tools.sparsebundle"
+            mount_point="$RUNNER_TEMP/cross-tools-case-sensitive"
+
+            hdiutil create -size 200g -type SPARSEBUNDLE -fs 'Case-sensitive Journaled HFS+' -volname cross-tools "$image"
+            mkdir -p "$mount_point"
+            hdiutil attach "$image" -mountpoint "$mount_point" -nobrowse
+            trap 'cd "$GITHUB_WORKSPACE"; hdiutil detach "$mount_point" || true' EXIT
+
+            rsync -a --delete "$GITHUB_WORKSPACE/" "$mount_point/workspace/"
+            pushd "$mount_point/workspace"
             HOST_TAG="${{ steps.runner.outputs.host_tag }}" ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+            popd
+
+            cp "$mount_point/workspace/${file_name}.tar.xz" "$GITHUB_WORKSPACE/"
+            cp "$mount_point/workspace/${file_name}.tar.xz.sha256" "$GITHUB_WORKSPACE/"
           else
             sudo rm -rf /opt/x-tools
             HOST_TAG="${{ steps.runner.outputs.host_tag }}" ./scripts/make ${{ matrix.target }} ${{ matrix.version }}

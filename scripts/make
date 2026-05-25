@@ -257,7 +257,7 @@ package_toolchain() {
 install_packages
 install_crosstool_ng
 prepare_config
-run_olddefconfig_if_needed
+# run_olddefconfig_if_needed
 build_toolchain
 verify_toolchain
 package_toolchain
