@@ -6,6 +6,8 @@ TARGET=${1:-}
 VERSION=${2:-stable}
 OS_NAME="$(uname -s)"
 ARCH_NAME="$(uname -m)"
+BUILD_PREFIX=""
+BUILD_SUFFIX=""
 
 if [ -z "${TARGET}" ]; then
     echo "Usage: $0 <target> <version>"
@@ -131,6 +133,8 @@ install_darwin_packages() {
     if [ -n "${gcc_bin}" ]; then
         gcc_version="${gcc_bin##*-}"
         gxx_bin="${brew_prefix}/bin/g++-${gcc_version}"
+        BUILD_PREFIX="$(${gcc_bin} -dumpmachine)-"
+        BUILD_SUFFIX="-${gcc_version}"
         export CC="${gcc_bin}"
         if [ -x "${gxx_bin}" ]; then
             export CXX="${gxx_bin}"
@@ -194,14 +198,14 @@ prepare_config() {
         sed -i.bak "s/^CT_PREFIX_DIR=.*/CT_PREFIX_DIR=\"${escaped_prefix}\"/" build/.config
         rm -f build/.config.bak
 
-        if grep -q '^CT_STATIC_TOOLCHAIN=y' build/.config; then
-            sed -i.bak \
-                -e 's/^CT_STATIC_TOOLCHAIN=y/# CT_STATIC_TOOLCHAIN is not set/' \
-                -e 's/^CT_WANTS_STATIC_LINK=y/# CT_WANTS_STATIC_LINK is not set/' \
-                -e 's/^CT_WANTS_STATIC_LINK_CXX=y/# CT_WANTS_STATIC_LINK_CXX is not set/' \
-                build/.config
-            rm -f build/.config.bak
-        fi
+        sed -i.bak \
+            -e "s/^CT_BUILD_PREFIX=.*/CT_BUILD_PREFIX=\"${BUILD_PREFIX}\"/" \
+            -e "s/^CT_BUILD_SUFFIX=.*/CT_BUILD_SUFFIX=\"${BUILD_SUFFIX}\"/" \
+            -e 's/^CT_WANTS_STATIC_LINK=y/# CT_WANTS_STATIC_LINK is not set/' \
+            -e 's/^CT_WANTS_STATIC_LINK_CXX=y/# CT_WANTS_STATIC_LINK_CXX is not set/' \
+            -e 's/^CT_STATIC_TOOLCHAIN=y/# CT_STATIC_TOOLCHAIN is not set/' \
+            build/.config
+        rm -f build/.config.bak
     else
         INSTALL_DIR="/opt/x-tools/${TARGET}"
         sudo mkdir -p /opt
