@@ -1,89 +1,262 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-TARGET=$1
-VERSION=$2
-
-if [ -z "${VERSION}" ]; then
-    VERSION=stable
-fi
+TARGET=${1:-}
+VERSION=${2:-stable}
+OS_NAME="$(uname -s)"
+ARCH_NAME="$(uname -m)"
 
 if [ -z "${TARGET}" ]; then
     echo "Usage: $0 <target> <version>"
     exit 1
 fi
 
-# packages
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-    automake \
-    bison \
-    bzip2 \
-    ca-certificates \
-    cmake \
-    curl \
-    file \
-    flex \
-    g++ \
-    gawk \
-    gdb \
-    git \
-    gperf \
-    help2man \
-    libncurses-dev \
-    libssl-dev \
-    libtool-bin \
-    lzip \
-    make \
-    ninja-build \
-    patch \
-    pkg-config \
-    python3 \
-    rsync \
-    sudo \
-    texinfo \
-    unzip \
-    wget \
-    xz-utils \
-    libssl-dev \
-    libffi-dev
+case "${OS_NAME}" in
+    Linux)
+        HOST_OS=linux
+        MAKE=make
+        TAR=tar
+        JOBS="$(nproc)"
+        if [ -z "${HOST_TAG:-}" ]; then
+            case "${ARCH_NAME}" in
+                x86_64) HOST_TAG=linux-x86_64 ;;
+                aarch64|arm64) HOST_TAG=linux-aarch64 ;;
+                *) HOST_TAG="linux-${ARCH_NAME}" ;;
+            esac
+        fi
+        ;;
+    Darwin)
+        HOST_OS=darwin
+        MAKE=gmake
+        TAR=gtar
+        JOBS="$(sysctl -n hw.ncpu)"
+        if [ -z "${HOST_TAG:-}" ]; then
+            case "${ARCH_NAME}" in
+                x86_64) HOST_TAG=darwin-x86_64 ;;
+                arm64|aarch64) HOST_TAG=darwin-arm64 ;;
+                *) HOST_TAG="darwin-${ARCH_NAME}" ;;
+            esac
+        fi
+        ;;
+    *)
+        echo "Unsupported host OS: ${OS_NAME}"
+        exit 1
+        ;;
+esac
 
-# crosstool-ng
-if [ ! -e /usr/bin/ct-ng ]; then
-    if [ $VERSION != "latest" ]; then
+checksum_file() {
+    local file=$1
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "${file}" | awk '{ print $1 }'
+    elif command -v gsha256sum >/dev/null 2>&1; then
+        gsha256sum "${file}" | awk '{ print $1 }'
+    else
+        shasum -a 256 "${file}" | awk '{ print $1 }'
+    fi
+}
+
+install_linux_packages() {
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends \
+        automake \
+        bison \
+        bzip2 \
+        ca-certificates \
+        cmake \
+        curl \
+        file \
+        flex \
+        g++ \
+        gawk \
+        gdb \
+        git \
+        gperf \
+        help2man \
+        libncurses-dev \
+        libssl-dev \
+        libtool-bin \
+        lzip \
+        make \
+        ninja-build \
+        patch \
+        pkg-config \
+        python3 \
+        rsync \
+        sudo \
+        texinfo \
+        unzip \
+        wget \
+        xz-utils \
+        libffi-dev
+}
+
+install_darwin_packages() {
+    brew update
+    brew install \
+        autoconf \
+        automake \
+        bash \
+        bison \
+        cmake \
+        coreutils \
+        curl \
+        flex \
+        gawk \
+        gcc \
+        gettext \
+        gnu-sed \
+        gnu-tar \
+        gnu-which \
+        gperf \
+        help2man \
+        libtool \
+        lzip \
+        make \
+        ncurses \
+        ninja \
+        pkg-config \
+        python \
+        texinfo \
+        wget \
+        xz
+
+    local brew_prefix gcc_bin gcc_version gxx_bin
+    brew_prefix="$(brew --prefix)"
+    export PATH="${brew_prefix}/opt/bison/bin:${brew_prefix}/opt/flex/bin:${brew_prefix}/opt/gettext/bin:${brew_prefix}/opt/gnu-sed/libexec/gnubin:${brew_prefix}/opt/gnu-tar/libexec/gnubin:${brew_prefix}/opt/gnu-which/libexec/gnubin:${brew_prefix}/opt/make/libexec/gnubin:${brew_prefix}/opt/texinfo/bin:${brew_prefix}/bin:${brew_prefix}/sbin:${HOME}/.local/bin:${PATH}"
+
+    gcc_bin="$(find "${brew_prefix}/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -t- -k2,2n | tail -n 1)"
+    if [ -n "${gcc_bin}" ]; then
+        gcc_version="${gcc_bin##*-}"
+        gxx_bin="${brew_prefix}/bin/g++-${gcc_version}"
+        export CC="${gcc_bin}"
+        if [ -x "${gxx_bin}" ]; then
+            export CXX="${gxx_bin}"
+        fi
+    fi
+}
+
+install_packages() {
+    case "${HOST_OS}" in
+        linux) install_linux_packages ;;
+        darwin) install_darwin_packages ;;
+    esac
+}
+
+install_crosstool_ng() {
+    if command -v ct-ng >/dev/null 2>&1; then
+        return
+    fi
+
+    local prefix
+    if [ "${HOST_OS}" = linux ]; then
+        prefix=/usr
+    else
+        prefix="${HOME}/.local"
+        mkdir -p "${prefix}"
+        export PATH="${prefix}/bin:${PATH}"
+    fi
+
+    if [ "${VERSION}" != "latest" ]; then
         curl -Lf https://github.com/crosstool-ng/crosstool-ng/archive/crosstool-ng-1.28.0.tar.gz | tar xzf -
         pushd crosstool-ng-crosstool-ng-1.28.0
         for i in ../targets/${TARGET}/*; do
             if [[ $i == *.patch ]]; then
-                patch -Np1 -i $i
+                patch -Np1 -i "$i"
             fi
         done
     else
         curl -Lf https://github.com/crosstool-ng/crosstool-ng/archive/refs/heads/master.tar.gz | tar xzf -
         pushd crosstool-ng-master
     fi
+
     ./bootstrap
-    ./configure --prefix=/usr
-    make -j$(nproc)
-    sudo make install
+    ./configure --prefix="${prefix}"
+    "${MAKE}" -j"${JOBS}"
+    if [ "${HOST_OS}" = linux ]; then
+        sudo "${MAKE}" install
+    else
+        "${MAKE}" install
+    fi
     popd
-fi
+}
 
-# build
-sudo mkdir -p /opt
-sudo chmod 0777 /opt
-mkdir -p build
-cp targets/${TARGET}/${VERSION}/.config build/.config
-pushd build
-export CT_ALLOW_BUILD_AS_ROOT_SURE=1
-ct-ng build || { tail -n 500 build.log; exit $ERRCODE; }
-popd
+prepare_config() {
+    mkdir -p build
+    cp "targets/${TARGET}/${VERSION}/.config" build/.config
 
-# tarball
-sudo mv /opt/x-tools/${TARGET} .
-sudo chown -R root:root ${TARGET}
+    if [ "${HOST_OS}" = darwin ]; then
+        local escaped_prefix
+        INSTALL_DIR="${PWD}/x-tools/${TARGET}"
+        escaped_prefix=$(printf '%s\n' "${INSTALL_DIR}" | sed 's/[&/]/\\&/g')
+        sed -i.bak "s/^CT_PREFIX_DIR=.*/CT_PREFIX_DIR=\"${escaped_prefix}\"/" build/.config
+        rm -f build/.config.bak
 
-FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}"
-sudo tar -cJf ${FILE_NAME}.tar.xz ${TARGET}
-sudo sha256sum ${FILE_NAME}.tar.xz | awk '{ print $1 }' > ${FILE_NAME}.tar.xz.sha256
+        if grep -q '^CT_STATIC_TOOLCHAIN=y' build/.config; then
+            sed -i.bak \
+                -e 's/^CT_STATIC_TOOLCHAIN=y/# CT_STATIC_TOOLCHAIN is not set/' \
+                -e 's/^CT_WANTS_STATIC_LINK=y/# CT_WANTS_STATIC_LINK is not set/' \
+                -e 's/^CT_WANTS_STATIC_LINK_CXX=y/# CT_WANTS_STATIC_LINK_CXX is not set/' \
+                build/.config
+            rm -f build/.config.bak
+        fi
+    else
+        INSTALL_DIR="/opt/x-tools/${TARGET}"
+        sudo mkdir -p /opt
+        sudo chmod 0777 /opt
+    fi
+}
+
+run_olddefconfig_if_needed() {
+    if [ "${HOST_OS}" != darwin ]; then
+        return
+    fi
+
+    pushd build
+    ct-ng olddefconfig
+    popd
+}
+
+build_toolchain() {
+    pushd build
+    export CT_ALLOW_BUILD_AS_ROOT_SURE=1
+    ct-ng build || { tail -n 500 build.log; exit 1; }
+    popd
+}
+
+verify_toolchain() {
+    local gcc="${INSTALL_DIR}/bin/${TARGET}-gcc"
+    local verify_dir="${PWD}/build/verify"
+
+    "${gcc}" --version
+    file "${gcc}"
+
+    mkdir -p "${verify_dir}"
+    printf 'int main(void) { return 0; }\n' > "${verify_dir}/smoke.c"
+    "${gcc}" -c "${verify_dir}/smoke.c" -o "${verify_dir}/smoke.o"
+    file "${verify_dir}/smoke.o"
+}
+
+package_toolchain() {
+    FILE_NAME="${HOST_TAG}-cross-tools-${TARGET}-${VERSION}"
+
+    if [ "${HOST_OS}" = linux ]; then
+        sudo mv "${INSTALL_DIR}" .
+        sudo chown -R root:root "${TARGET}"
+        sudo "${TAR}" -cJf "${FILE_NAME}.tar.xz" "${TARGET}"
+    else
+        mv "${INSTALL_DIR}" .
+        "${TAR}" -cJf "${FILE_NAME}.tar.xz" "${TARGET}"
+    fi
+
+    checksum_file "${FILE_NAME}.tar.xz" > "${FILE_NAME}.tar.xz.sha256"
+}
+
+install_packages
+install_crosstool_ng
+prepare_config
+run_olddefconfig_if_needed
+build_toolchain
+verify_toolchain
+package_toolchain

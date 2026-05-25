@@ -17,6 +17,8 @@ jobs:
         os:
           - ubuntu-22.04
           - ubuntu-22.04-arm
+          - macos-26-intel
+          - macos-26
         version:
           - stable
           - mainline
@@ -27,36 +29,86 @@ jobs:
           - loongarch64-unknown-linux-musl
         exclude:
           - target: loongarch64-unknown-linux-musl
-            version: baseline        
-      
+            version: baseline
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-      - name: Build
+      - name: Prepare runner
+        id: runner
+        shell: bash
         run: |
-          sudo rm -rf /opt/x-tools
-          ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+          case "${{ matrix.os }}" in
+            ubuntu-22.04)
+              echo "host_tag=linux-x86_64" >> "$GITHUB_OUTPUT"
+              echo "macos=false" >> "$GITHUB_OUTPUT"
+              ;;
+            ubuntu-22.04-arm)
+              echo "host_tag=linux-aarch64" >> "$GITHUB_OUTPUT"
+              echo "macos=false" >> "$GITHUB_OUTPUT"
+              ;;
+            macos-26-intel)
+              echo "host_tag=darwin-x86_64" >> "$GITHUB_OUTPUT"
+              echo "macos=true" >> "$GITHUB_OUTPUT"
+              ;;
+            macos-26)
+              echo "host_tag=darwin-arm64" >> "$GITHUB_OUTPUT"
+              echo "macos=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported runner: ${{ matrix.os }}" >&2
+              exit 1
+              ;;
+          esac
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          file_name="${{ steps.runner.outputs.host_tag }}-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
+
+          if [[ "${{ steps.runner.outputs.macos }}" == "true" ]]; then
+            ulimit -n 2048
+            image="$RUNNER_TEMP/cross-tools.sparseimage"
+            mount_point="$RUNNER_TEMP/cross-tools-case-sensitive"
+
+            mkdir -p "$mount_point"
+            hdiutil create -size 200g -type SPARSE -fs APFSX -volname cross-tools "$image"
+            hdiutil attach "$image" -mountpoint "$mount_point"
+            trap 'cd "$GITHUB_WORKSPACE"; hdiutil detach "$mount_point" || true' EXIT
+
+            rsync -a --delete "$GITHUB_WORKSPACE/" "$mount_point/workspace/"
+            pushd "$mount_point/workspace"
+            HOST_TAG="${{ steps.runner.outputs.host_tag }}" ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+            popd
+
+            cp "$mount_point/workspace/${file_name}.tar.xz" "$GITHUB_WORKSPACE/"
+            cp "$mount_point/workspace/${file_name}.tar.xz.sha256" "$GITHUB_WORKSPACE/"
+          else
+            sudo rm -rf /opt/x-tools
+            HOST_TAG="${{ steps.runner.outputs.host_tag }}" ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+          fi
 
       - name: Generate file
+        id: package
         run: |
-          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
-          echo "file_name=${file_name}" >> $GITHUB_ENV
+          file_name="${{ steps.runner.outputs.host_tag }}-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
+          echo "file_name=${file_name}" >> "$GITHUB_OUTPUT"
           ls -al
 
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.file_name }}.tar.xz
-          path: ${{ env.file_name }}.tar.xz
+          name: ${{ steps.package.outputs.file_name }}.tar.xz
+          path: ${{ steps.package.outputs.file_name }}.tar.xz
           if-no-files-found: error
           retention-days: 1
       - name: Upload checksum
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.file_name }}.tar.xz.sha256
-          path: ${{ env.file_name }}.tar.xz.sha256
+          name: ${{ steps.package.outputs.file_name }}.tar.xz.sha256
+          path: ${{ steps.package.outputs.file_name }}.tar.xz.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -77,16 +129,17 @@ jobs:
           pattern: "*.tar.*"
           merge-multiple: true
       - name: Create release
+        id: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
           tag_name="$(date +%Y%m%d)"
-          echo "tag_name=${tag_name}" >> $GITHUB_ENV
+          echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
           gh release create ${tag_name} --title "${tag_name}" --generate-notes || true
       - name: Generate checksums
         run: |
-          echo "**Supported targets**: [${{ env.tag_name }}](https://github.com/${{ github.repository }}/tree/${{ env.tag_name }}#supported-targets)" > RELEASE.md
+          echo "**Supported targets**: [${{ steps.release.outputs.tag_name }}](https://github.com/${{ github.repository }}/tree/${{ steps.release.outputs.tag_name }}#supported-targets)" > RELEASE.md
           echo "| Filename | Sha256sum |" >> RELEASE.md
           echo "| -------- | --------- |" >> RELEASE.md
           for i in release/*.sha256; do
@@ -97,7 +150,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for i in release/*.tar.xz; do
-            # gh release upload ${{ env.tag_name }} $i $i.sha256
-            gh release upload ${{ env.tag_name }} $i
+            # gh release upload ${{ steps.release.outputs.tag_name }} $i $i.sha256
+            gh release upload ${{ steps.release.outputs.tag_name }} $i
           done
-          gh release edit ${{ env.tag_name }} -F RELEASE.md
+          gh release edit ${{ steps.release.outputs.tag_name }} -F RELEASE.md
