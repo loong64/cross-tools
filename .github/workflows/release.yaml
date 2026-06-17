@@ -87,11 +87,7 @@ jobs:
       - name: Generate checksums
         run: |
           echo "**Supported targets**: [${{ env.tag_name }}](https://github.com/${{ github.repository }}/tree/${{ env.tag_name }}#supported-targets)" > RELEASE.md
-          echo "| Filename | Sha256sum |" >> RELEASE.md
-          echo "| -------- | --------- |" >> RELEASE.md
-          for i in release/*.sha256; do
-            echo "| $(basename $i .sha256) | $(cat $i) |" >> RELEASE.md
-          done
+          sed -n '/## Supported targets/,/### Note/{ /## Supported targets/b; /### Note/b; p; }' README.md >> RELEASE.md
       - name: Upload artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
