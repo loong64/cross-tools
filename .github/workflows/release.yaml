@@ -63,6 +63,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    if: always()
     needs:
       - build
     steps:
@@ -83,7 +84,12 @@ jobs:
           set -x
           tag_name="$(date +%Y%m%d)"
           echo "tag_name=${tag_name}" >> $GITHUB_ENV
-          gh release create ${tag_name} --title "${tag_name}" --generate-notes || true
+          if gh release view "${tag_name}" > /dev/null 2>&1; then
+            echo "Release ${tag_name} already exists, skipping creation."
+          else
+            echo "Creating release ${tag_name}..."
+            gh release create "${tag_name}" --title "${tag_name}" --generate-notes
+          fi
       - name: Generate checksums
         run: |
           echo "**Supported targets**: [${{ env.tag_name }}](https://github.com/${{ github.repository }}/tree/${{ env.tag_name }}#supported-targets)" > RELEASE.md
@@ -93,7 +99,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for i in release/*.tar.xz; do
-            # gh release upload ${{ env.tag_name }} $i $i.sha256
-            gh release upload ${{ env.tag_name }} $i
+            [ -e "$i" ] || continue
+            gh release upload ${{ env.tag_name }} "$i" --clobber
           done
           gh release edit ${{ env.tag_name }} -F RELEASE.md
