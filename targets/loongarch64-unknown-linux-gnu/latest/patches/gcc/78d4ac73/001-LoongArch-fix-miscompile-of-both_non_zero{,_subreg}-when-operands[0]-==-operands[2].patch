@@ -1,0 +1,162 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <SRS0=BAjS=GZ=xry111.site=xry111@sourceware.org>
+Received: from xry111.site (xry111.site [89.208.246.23])
+	by sourceware.org (Postfix) with ESMTPS id 2F48C4BA2E0C
+	for <gcc-patches@gcc.gnu.org>; Tue,  1 Sep 2026 04:26:04 +0000 (GMT)
+DMARC-Filter: OpenDMARC Filter v1.4.2 sourceware.org 2F48C4BA2E0C
+Authentication-Results: sourceware.org; dmarc=pass (p=reject dis=none) header.from=xry111.site
+Authentication-Results: sourceware.org; spf=pass smtp.mailfrom=xry111.site
+ARC-Filter: OpenARC Filter v1.0.0 sourceware.org 2F48C4BA2E0C
+Authentication-Results: sourceware.org; arc=none smtp.remote-ip=89.208.246.23
+ARC-Seal: i=1; a=rsa-sha256; d=sourceware.org; s=key; t=1788236764; cv=none;
+	b=PfFoEXagKR0OTrUDdtrQHBoxYs0Pb7URohUFr1Sf6hRKzqcnuK1Grgj/emim1fr4wbBmoxHsBHL7TzTrR4pgvcN5t0Log8ZXguOKw1bJHQw2lQB3VyPEUtu4hcIllSkSBnKYgEkYdgKu6WnUUhhzpsU8cT8fapKg37I8f14o77w=
+ARC-Message-Signature: i=1; a=rsa-sha256; d=sourceware.org; s=key;
+	t=1788236764; c=relaxed/simple;
+	bh=nSsD2Sdqa2lV6JvwKp3RhGo43NiW+2y8zoV77lkGJrA=;
+	h=DKIM-Signature:From:To:Subject:Date:Message-ID:MIME-Version; b=oQWXzNVp4/FFTDdRO+4fd6XtRv+IiYnCJN4r5f1fvFppJuRNaDNT+hACar5GKVaxhkjhSLVUm7wRPbtW6b3uKgkYeSp5uRM2IYldZeNYUm9AicBo0oWWJhG0Zg5TYlVdgzWtWT4VBzTGO1IVaBiVgVxWVUlyyfd9cwkwZOG0a/4=
+ARC-Authentication-Results: i=1; sourceware.org; dkim=pass (1024-bit key, unprotected) header.d=xry111.site header.i=@xry111.site header.a=rsa-sha256 header.s=default header.b=C6VI1moA
+DKIM-Filter: OpenDKIM Filter v2.11.0 sourceware.org 2F48C4BA2E0C
+Authentication-Results: sourceware.org;
+	dkim=pass (1024-bit key, unprotected) header.d=xry111.site header.i=@xry111.site header.a=rsa-sha256 header.s=default header.b=C6VI1moA
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=xry111.site;
+	s=default; t=1788236732;
+	bh=Ohb6UoeZzhfUYe5sKzFmMhK7rx8KuVQIV0sQfSa3Gtk=;
+	h=From:To:Cc:Subject:Date:From;
+	b=C6VI1moALgywtVjjerVI9OWnYd/Zi8LskzH3HneMLqC0f6KMB8p49cmtv3GDx63W1
+	 mBpV7Qj44pG69ATYtDXext7fqGHxNZEdOpEGZo3Vm4ALL1PiKfEO67tvKHMGnI6s0l
+	 XiF1PdBUx2YWQKmrwcIX6OArcBQjgPtn1yNSnMXE=
+Received: from stargazer (unknown [IPv6:2408:824e:301:1821:c427:8c70:2426:3])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature ECDSA (secp384r1) server-digest SHA384)
+	(Client did not present a certificate)
+	(Authenticated sender: xry111@xry111.site)
+	by xry111.site (Postfix) with ESMTPSA id 265B665AAE;
+	Tue,  1 Sep 2026 00:25:28 -0400 (EDT)
+From: Xi Ruoyao <xry111@xry111.site>
+To: gcc-patches@gcc.gnu.org
+Cc: Lulu Cheng <chenglulu@loongson.cn>,
+	Chenghua Xu <xuchenghua@loongson.cn>,
+	Yanjun Yang <yangyj.ee@gmail.com>,
+	WANG Xuerui <i@xen0n.name>,
+	Mingcong Bai <jeffbai@aosc.io>,
+	Zixing Liu <liushuyu@aosc.io>,
+	Xi Ruoyao <xry111@xry111.site>
+Subject: [PATCH] LoongArch: fix miscompile of both_non_zero{,_subreg} when operands[0] == operands[2] [PR 127153]
+Date: Tue,  1 Sep 2026 12:23:56 +0800
+Message-ID: <20260901042444.44649-1-xry111@xry111.site>
+X-Mailer: git-send-email 2.55.0
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+X-Spam-Status: No, score=-9.4 required=5.0 tests=BAYES_00,DKIM_SIGNED,DKIM_VALID,DKIM_VALID_AU,DKIM_VALID_EF,GIT_PATCH_0,LIKELY_SPAM_FROM,SPF_HELO_PASS,SPF_PASS,TXREP shortcircuit=no autolearn=ham autolearn_force=no version=3.4.6
+X-Spam-Checker-Version: SpamAssassin 3.4.6 (2021-04-09) on sourceware.org
+List-Id: <gcc-patches.gcc.gnu.org>
+
+Here operands[0] is written before the instruction is finished using
+operands[2] so it cannot lie in a register that is read by the
+instruction.  Thus it should be an earlyclobber operand.  As operands[1]
+is only used before the early result is written, it can be tied to the
+earlyclobber operand so explicitly allow doing so.
+
+Defer the split after reload as constrants do not apply to pseudos.
+
+	PR target/127153
+
+gcc/
+
+	* config/loongarch/loongarch.md (both_non_zero): Defer the split
+	post reload and add constraint to ensure operands[0] and
+	operands[2] are in different hard registers.
+	(both_non_zero_subreg): Likewise.
+
+gcc/testsuite/
+
+	* c-c++-common/pr127153.c: New test.
+---
+
+Bootstrapped and regtested on loongarch64-linux-gnu.  Ok for trunk?
+
+ gcc/config/loongarch/loongarch.md     | 12 +++++------
+ gcc/testsuite/c-c++-common/pr127153.c | 31 +++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/c-c++-common/pr127153.c
+
+diff --git a/gcc/config/loongarch/loongarch.md b/gcc/config/loongarch/loongarch.md
+index 37ae5a2223e..ecf1563270f 100644
+--- a/gcc/config/loongarch/loongarch.md
++++ b/gcc/config/loongarch/loongarch.md
+@@ -2755,14 +2755,14 @@ (define_insn "*sel<code><GPR:mode>_using_<X:mode>"
+    (set_attr "mode" "<GPR:MODE>")])
+ 
+ (define_insn_and_split "both_non_zero"
+-  [(set (match_operand:DI 0 "register_operand" "=r")
+-	(and:DI (ne:DI (match_operand:DI 1 "register_operand" "r")
++  [(set (match_operand:DI 0 "register_operand" "=&r")
++	(and:DI (ne:DI (match_operand:DI 1 "register_operand" "r0")
+ 		       (const_int 0))
+ 		(ne:DI (match_operand:DI 2 "register_operand" "r")
+ 		       (const_int 0))))]
+   "TARGET_64BIT"
+   "#"
+-  "&& true"
++  "&& reload_completed"
+   [(set (match_dup 0)
+ 	(ne:DI (match_dup 1) (const_int 0)))
+    (set (match_dup 0)
+@@ -2771,14 +2771,14 @@ (define_insn_and_split "both_non_zero"
+ 			 (const_int 0)))])
+ 
+ (define_insn_and_split "both_non_zero_subreg"
+-  [(set (match_operand:DI 0 "register_operand" "=r")
+-	(and:DI (subreg:DI (ne:SI (match_operand:DI 1 "register_operand" "r")
++  [(set (match_operand:DI 0 "register_operand" "=&r")
++	(and:DI (subreg:DI (ne:SI (match_operand:DI 1 "register_operand" "r0")
+ 				  (const_int 0)) 0)
+ 		(subreg:DI (ne:SI (match_operand:DI 2 "register_operand" "r")
+ 				  (const_int 0)) 0)))]
+   "TARGET_64BIT"
+   "#"
+-  "&& true"
++  "&& reload_completed"
+   [(set (match_dup 0)
+ 	(ne:DI (match_dup 1) (const_int 0)))
+    (set (match_dup 0)
+diff --git a/gcc/testsuite/c-c++-common/pr127153.c b/gcc/testsuite/c-c++-common/pr127153.c
+new file mode 100644
+index 00000000000..5c8422d9b56
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/pr127153.c
+@@ -0,0 +1,31 @@
++/* { dg-do run } */
++/* { dg-options "-O2" } */
++
++__attribute__ ((noipa)) static int
++a ()
++{
++  return 0;
++}
++
++__attribute__ ((noipa)) static int
++b ()
++{
++  return 1;
++}
++
++__attribute__ ((noipa)) static int
++calc (int cond)
++{
++  int v = a ();
++  if (cond)
++    return b () && v;
++  return v;
++}
++
++int
++main ()
++{
++  int r = calc (1);
++  if (r)
++    __builtin_trap ();
++}
+-- 
+2.55.0
+
