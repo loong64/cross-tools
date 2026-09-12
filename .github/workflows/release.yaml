@@ -63,7 +63,6 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    if: always()
     needs:
       - build
     steps:
