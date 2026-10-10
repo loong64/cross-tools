@@ -6,12 +6,14 @@ TARGET=$1
 VERSION=$2
 HOST_ARCH=$3
 
-if [ -z "${VERSION}" ]; then
-    VERSION=stable
+CANADIAN_BUILD=0
+
+if [ -n "${HOST_ARCH}" ]; then
+    CANADIAN_BUILD=1
 fi
 
-if [ -z "${HOST_ARCH}" ]; then
-    HOST_ARCH=mingw-w64
+if [ -z "${VERSION}" ]; then
+    VERSION=stable
 fi
 
 if [ -z "${TARGET}" ]; then
@@ -19,23 +21,23 @@ if [ -z "${TARGET}" ]; then
     exit 1
 fi
 
-case $HOST_ARCH in
-    mingw-w64)
-        GCC_PACKAGE="gcc-mingw-w64-x86-64-win32"
-        GPP_PACKAGE="g++-mingw-w64-x86-64-win32"
-        HOST_PREFIX="x86_64-w64-mingw32"
-        ;;
-    *)
-        echo "Unsupported host architecture: ${HOST_ARCH}"
-        exit 1
-        ;;
-esac
+if [ $CANADIAN_BUILD -eq 1 ]; then
+    case $HOST_ARCH in
+        mingw-w64)
+            GCC_PACKAGE="gcc-mingw-w64-x86-64-win32"
+            GPP_PACKAGE="g++-mingw-w64-x86-64-win32"
+            HOST_PREFIX="x86_64-w64-mingw32"
+            ;;
+        *)
+            echo "Unsupported host architecture: ${HOST_ARCH}"
+            exit 1
+            ;;
+    esac
+fi
 
 # packages
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-    "$GCC_PACKAGE" \
-    "$GPP_PACKAGE" \
     automake \
     bison \
     bzip2 \
@@ -65,7 +67,9 @@ sudo apt-get install -y --no-install-recommends \
     unzip \
     wget \
     xz-utils \
-    libffi-dev
+    libffi-dev \
+    "$GCC_PACKAGE" \
+    "$GPP_PACKAGE"
 
 # crosstool-ng
 if [ ! -e /usr/bin/ct-ng ]; then
@@ -89,7 +93,9 @@ sudo chmod 0777 /opt
 rm -rf build
 mkdir -p build
 cp "targets/${TARGET}/${VERSION}/.config" build/.config
-sed -i "s/CT_HOST=\"\"/CT_HOST=\"${HOST_PREFIX}\"/g" build/.config
+if [ $CANADIAN_BUILD -eq 1 ]; then
+    sed -i "s/CT_HOST=\"\"/CT_HOST=\"${HOST_PREFIX}\"/g" build/.config
+fi
 if [ -e "targets/${TARGET}/${VERSION}/patches" ]; then
     cp -r "targets/${TARGET}/${VERSION}/patches" build/
     sed -i "s@CT_LOCAL_PATCH_DIR=\"REPLACE_ME\"@CT_LOCAL_PATCH_DIR=\"$(realpath build/patches)\"@g" build/.config
@@ -104,7 +110,11 @@ popd
 sudo mv "/opt/x-tools/${TARGET}" .
 sudo chown -R root:root "${TARGET}"
 
-FILE_NAME="${HOST_PREFIX}-cross-tools-${TARGET}-${VERSION}"
+if [ $CANADIAN_BUILD -eq 1 ]; then
+    FILE_NAME="${HOST_PREFIX}-cross-tools-${TARGET}-${VERSION}"
+else
+    FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}"
+fi
 echo "FILE_NAME=${FILE_NAME}" >> "$GITHUB_OUTPUT"
 sudo tar -cJf "${FILE_NAME}.tar.xz" "${TARGET}"
 sudo sha256sum "${FILE_NAME}.tar.xz" | awk '{ print $1 }' > "${FILE_NAME}.tar.xz.sha256"

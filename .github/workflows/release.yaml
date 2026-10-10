@@ -10,42 +10,53 @@ permissions:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        host_arch:
-          - mingw-w64
+        os:
+          - ubuntu-22.04
+          - ubuntu-22.04-arm
         version:
           - stable
+          - mainline
+          - latest
+          - baseline
         target:
-          - x86_64-w64-mingw32
-
+          - loongarch64-unknown-linux-gnu
+          - loongarch64-unknown-linux-musl
+        exclude:
+          - target: loongarch64-unknown-linux-musl
+            version: baseline        
+      
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-      - name: Validate windows-only config
-        run: ./scripts/validate-windows-only.sh
       - name: Build
-        id: build
         run: |
           sudo rm -rf /opt/x-tools
-          ./scripts/make ${{ matrix.target }} ${{ matrix.version }} ${{ matrix.host_arch }}
+          ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+
+      - name: Generate file
+        run: |
+          file_name="$(uname -m)-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
+          echo "file_name=${file_name}" >> $GITHUB_ENV
+          ls -al
 
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.build.outputs.FILE_NAME }}.tar.xz
-          path: ${{ steps.build.outputs.FILE_NAME }}.tar.xz
+          name: ${{ env.file_name }}.tar.xz
+          path: ${{ env.file_name }}.tar.xz
           if-no-files-found: error
           retention-days: 1
       - name: Upload checksum
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.build.outputs.FILE_NAME }}.tar.xz.sha256
-          path: ${{ steps.build.outputs.FILE_NAME }}.tar.xz.sha256
+          name: ${{ env.file_name }}.tar.xz.sha256
+          path: ${{ env.file_name }}.tar.xz.sha256
           if-no-files-found: error
           retention-days: 1
 
