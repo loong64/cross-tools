@@ -4,19 +4,38 @@ set -e
 
 TARGET=$1
 VERSION=$2
+HOST_ARCH=$3
 
 if [ -z "${VERSION}" ]; then
     VERSION=stable
 fi
 
+if [ -z "${HOST_ARCH}" ]; then
+    HOST_ARCH=mingw-w64
+fi
+
 if [ -z "${TARGET}" ]; then
-    echo "Usage: $0 <target> <version>"
+    echo "Usage: $0 <target> <version> [host-arch]"
     exit 1
 fi
+
+case $HOST_ARCH in
+    mingw-w64)
+        GCC_PACKAGE="gcc-mingw-w64-x86-64-win32"
+        GPP_PACKAGE="g++-mingw-w64-x86-64-win32"
+        HOST_PREFIX="x86_64-w64-mingw32"
+        ;;
+    *)
+        echo "Unsupported host architecture: ${HOST_ARCH}"
+        exit 1
+        ;;
+esac
 
 # packages
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
+    "$GCC_PACKAGE" \
+    "$GPP_PACKAGE" \
     automake \
     bison \
     bzip2 \
@@ -46,7 +65,6 @@ sudo apt-get install -y --no-install-recommends \
     unzip \
     wget \
     xz-utils \
-    libssl-dev \
     libffi-dev
 
 # crosstool-ng
@@ -55,12 +73,12 @@ if [ ! -e /usr/bin/ct-ng ]; then
     pushd crosstool-ng-crosstool-ng-1.29.0
     for i in ../targets/${TARGET}/*; do
         if [[ $i == *.patch ]]; then
-            patch -Np1 -i $i
+            patch -Np1 -i "$i"
         fi
     done
     ./bootstrap
     ./configure --prefix=/usr
-    make -j$(nproc)
+    make -j"$(nproc)"
     sudo make install
     popd
 fi
@@ -68,17 +86,25 @@ fi
 # build
 sudo mkdir -p /opt
 sudo chmod 0777 /opt
+rm -rf build
 mkdir -p build
-cp targets/${TARGET}/${VERSION}/.config build/.config
+cp "targets/${TARGET}/${VERSION}/.config" build/.config
+sed -i "s/CT_HOST=\"\"/CT_HOST=\"${HOST_PREFIX}\"/g" build/.config
+if [ -e "targets/${TARGET}/${VERSION}/patches" ]; then
+    cp -r "targets/${TARGET}/${VERSION}/patches" build/
+    sed -i "s@CT_LOCAL_PATCH_DIR=\"REPLACE_ME\"@CT_LOCAL_PATCH_DIR=\"$(realpath build/patches)\"@g" build/.config
+fi
 pushd build
 export CT_ALLOW_BUILD_AS_ROOT_SURE=1
-ct-ng build || { tail -n 500 build.log; exit $ERRCODE; }
+ct-ng olddefconfig
+ct-ng build || { tail -n 500 build.log; exit 1; }
 popd
 
 # tarball
-sudo mv /opt/x-tools/${TARGET} .
-sudo chown -R root:root ${TARGET}
+sudo mv "/opt/x-tools/${TARGET}" .
+sudo chown -R root:root "${TARGET}"
 
-FILE_NAME="$(uname -m)-cross-tools-${TARGET}-${VERSION}"
-sudo tar -cJf ${FILE_NAME}.tar.xz ${TARGET}
-sudo sha256sum ${FILE_NAME}.tar.xz | awk '{ print $1 }' > ${FILE_NAME}.tar.xz.sha256
+FILE_NAME="${HOST_PREFIX}-cross-tools-${TARGET}-${VERSION}"
+echo "FILE_NAME=${FILE_NAME}" >> "$GITHUB_OUTPUT"
+sudo tar -cJf "${FILE_NAME}.tar.xz" "${TARGET}"
+sudo sha256sum "${FILE_NAME}.tar.xz" | awk '{ print $1 }' > "${FILE_NAME}.tar.xz.sha256"

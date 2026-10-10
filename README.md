@@ -1,22 +1,16 @@
 # cross-tools
 
-LoongArch64 cross-compile toolchain, supports both x86_64(amd64) and aarch64(arm64) architectures.
+Windows-oriented Canadian-cross toolchain release branch.
 
 ## Supported targets
 
-| Version      | Target                             | Kernel      | Binutils   | GCC        | Libc(glibc) | Libc(musl) |
-|--------------|------------------------------------|-------------|------------|------------|-------------|------------|
-| baseline     | loongarch64-unknown-linux-gnu      | 6.6.142     | 2.41       | 12.3.0     | 2.38        |            |
-| stable       | loongarch64-unknown-linux-gnu      | 6.6.142     | 2.41       | 14.4.0     | 2.38        |            |
-| stable       | loongarch64-unknown-linux-musl     | 6.6.142     | 2.41       | 14.4.0     |             | 1.2.5      |
-| mainline     | loongarch64-unknown-linux-gnu      | 6.12.93     | 2.41       | 14.4.0     | 2.41        |            |
-| mainline     | loongarch64-unknown-linux-musl     | 6.12.93     | 2.41       | 14.4.0     |             | 1.2.5      |
-| latest       | loongarch64-unknown-linux-gnu      | 6.18.35     | 2.47       | 16.2.0     | 2.44        |            |
-| latest       | loongarch64-unknown-linux-musl     | 6.18.35     | 2.47       | 16.2.0     |             | 1.2.6      |
+| Version      | Host (Canadian)         | Target             | Kernel  | Toolchain source |
+|--------------|-------------------------|--------------------|---------|------------------|
+| stable       | x86_64-w64-mingw32      | x86_64-w64-mingw32 | windows | crosstool-ng 1.29.0 |
 
 ### Note
 
-1. `baseline` is based on the version specified in GB/T 25656.
+1. This branch only keeps the MinGW-w64 based Windows Canadian-cross flow.
 
 ## How to use
 
@@ -32,7 +26,7 @@ sudo tar -xf ${Target}.tar.xz -C /opt/x-tools
 Fork this project and create a new release, or build manually:
 
 ```sh
-./scripts/make ${Target}
+./scripts/make ${Target} stable mingw-w64
 ```
 
 ## License
@@ -44,4 +38,3 @@ MIT
 We would like to express our gratitude to the following individuals and projects:
 
 - [crosstool-ng](https://github.com/crosstool-ng/crosstool-ng)
-- [musl-cross](https://github.com/musl-cross/musl-cross)
