@@ -37,7 +37,7 @@ jobs:
       - name: Build
         run: |
           sudo rm -rf /opt/x-tools
-          ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
+          bash ./scripts/make ${{ matrix.target }} ${{ matrix.version }}
 
       - name: Generate file
         run: |
@@ -60,11 +60,64 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-mingw:
+    name: Build MinGW
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - stable
+          - mainline
+          - latest
+          - baseline
+        target:
+          - loongarch64-unknown-linux-gnu
+          - loongarch64-unknown-linux-musl
+        host:
+          - mingw-w64
+        exclude:
+          - target: loongarch64-unknown-linux-musl
+            version: baseline        
+      
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - name: Build MinGW
+        run: |
+          sudo rm -rf /opt/x-tools
+          bash ./scripts/make-mingw ${{ matrix.target }} ${{ matrix.version }} ${{ matrix.host }}
+
+      - name: Generate file
+        run: |
+          file_name="x86_64-w64-mingw32-cross-tools-${{ matrix.target }}-${{ matrix.version }}"
+          echo "file_name=${file_name}" >> $GITHUB_ENV
+          ls -al
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.file_name }}.tar.xz
+          path: ${{ env.file_name }}.tar.xz
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.file_name }}.tar.xz.sha256
+          path: ${{ env.file_name }}.tar.xz.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+
   release:
     name: Release
     runs-on: ubuntu-latest
     needs:
       - build
+      - build-mingw
     steps:
       - name: Checkout
         uses: actions/checkout@v6
