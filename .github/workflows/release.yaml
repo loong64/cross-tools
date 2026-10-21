@@ -62,7 +62,7 @@ jobs:
 
   build-mingw:
     name: Build MinGW
-    runs-on: ubuntu-26.04
+    runs-on: [self-hosted, X64]
     strategy:
       fail-fast: false
       matrix:
