@@ -78,7 +78,13 @@ jobs:
           - mingw-w64
         exclude:
           - target: loongarch64-unknown-linux-musl
-            version: baseline        
+            version: baseline
+          # FIXME: checking whether we are using the GNU C compiler... x86_64-host_w64-mingw32-g++ -static-libstdc++ -static-libgcc -L/home/runner/work/cross-tools/cross-tools/build/.build/HOST-x86_64-w64-mingw32/loongarch64-unknown-linux-musl/buildtools/complibs-host/lib  -static -Wl,--stack,12582912 -fPIE  -o g++-mapper-server.exe server.o resolver.o ../libcody/libcody.a ../libiberty/pic/libiberty.a 
+          # x86_64-w64-mingw32-g++: error: ../libiberty/pic/libiberty.a: No such file or directory
+          - target: loongarch64-unknown-linux-musl
+            version: stable
+          - target: loongarch64-unknown-linux-musl
+            version: mainline
       
     steps:
       - name: Checkout
