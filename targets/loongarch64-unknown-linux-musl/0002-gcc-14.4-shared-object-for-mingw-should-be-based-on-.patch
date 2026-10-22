@@ -1,0 +1,48 @@
+From 6248e848ad8b811cf1a66ca2fe197dd1539d7ece Mon Sep 17 00:00:00 2001
+From: Yinan Qin <a.elysia@proton.me>
+Date: Thu, 22 Oct 2026 10:54:37 +0000
+Subject: [PATCH 2/2] gcc 14.4: shared object for mingw should be based on host
+ name
+
+---
+ ...gdiagnostics-DLL-for-mingw-should-be.patch | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+ create mode 100644 packages/gcc/14.4.0/0011-BACKPORT-gcc-libgdiagnostics-DLL-for-mingw-should-be.patch
+
+diff --git a/packages/gcc/14.4.0/0011-BACKPORT-gcc-libgdiagnostics-DLL-for-mingw-should-be.patch b/packages/gcc/14.4.0/0011-BACKPORT-gcc-libgdiagnostics-DLL-for-mingw-should-be.patch
+new file mode 100644
+index 0000000..6646441
+--- /dev/null
++++ b/packages/gcc/14.4.0/0011-BACKPORT-gcc-libgdiagnostics-DLL-for-mingw-should-be.patch
+@@ -0,0 +1,28 @@
++From a9d2fd095638fed8dfbe0cc0a17d8b1a4a3109fe Mon Sep 17 00:00:00 2001
++From: Yinan Qin <a.elysia@proton.me>
++Date: Thu, 22 Oct 2026 10:45:21 +0000
++Subject: [PATCH] BACKPORT: gcc: libgdiagnostics DLL for mingw should be for
++ mingw hosts
++
++Upstream commit: 823c96905429dbac1dffbdaace8f2d215d507a84
++Link: https://gcc.gnu.org/git/?p=gcc.git;a=commit;h=823c96905429dbac1dffbdaace8f2d215d507a84
++---
++ gcc/Makefile.in | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/gcc/Makefile.in b/gcc/Makefile.in
++index d475bf1c32e..f30e06e2e17 100644
++--- a/gcc/Makefile.in
+++++ b/gcc/Makefile.in
++@@ -1113,7 +1113,7 @@ ALL_LINKERFLAGS = $(ALL_CXXFLAGS) $(LD_PICFLAG)
++ 
++ # Use the "pic" build of libiberty if --enable-host-shared or --enable-host-pie,
++ # unless we are building for mingw.
++-LIBIBERTY_PICDIR=$(if $(findstring mingw,$(target)),,pic)
+++LIBIBERTY_PICDIR=$(if $(findstring mingw,$(host)),,pic)
++ ifneq ($(enable_host_shared)$(enable_host_pie),)
++ LIBIBERTY = ../libiberty/$(LIBIBERTY_PICDIR)/libiberty.a
++ else
++-- 
++2.55.0
++
+-- 
+2.55.0
+
